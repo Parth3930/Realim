@@ -9,7 +9,7 @@ const $$id = createComponent(($$result, $$props, $$slots) => {
   const Astro2 = $$result.createAstro($$Astro, $$props, $$slots);
   Astro2.self = $$id;
   const { id } = Astro2.params;
-  return renderTemplate`${renderComponent($$result, "Layout", $$Layout, { "title": `Board ${id}` }, { "default": ($$result2) => renderTemplate` ${maybeRenderHead()}<main> ${renderComponent($$result2, "Board", null, { "roomId": id || "default", "client:only": "react", "client:component-hydration": "only", "client:component-path": "@/components/Board", "client:component-export": "Board" })} </main> ` })}`;
+  return renderTemplate`${renderComponent($$result, "Layout", $$Layout, { "title": `Board ${id}` }, { "default": ($$result2) => renderTemplate` ${maybeRenderHead()}<main> ${renderComponent($$result2, "Board", null, { "roomId": id || "default", "client:only": "react", "client:component-hydration": "only", "client:component-path": "D:/Web/realim/src/components/Board", "client:component-export": "Board" })} </main> ` })}`;
 }, "D:/Web/realim/src/pages/board/[id].astro", void 0);
 
 const $$file = "D:/Web/realim/src/pages/board/[id].astro";

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, memo } from 'react';
-import { useBoardStore, type ElementType, type BoardElement } from '@/lib/store';
-import { useP2P } from '@/lib/p2p';
+import { useBoardStore, type ElementType, type BoardElement } from '../lib/store';
+import { useP2P } from '../lib/p2p';
 import { nanoid } from 'nanoid';
 import { motion, AnimatePresence } from 'framer-motion';
 import { get, set } from 'idb-keyval';
@@ -16,11 +16,11 @@ import {
     Plus,
     Key
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { cn } from '../lib/utils';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
 
 import { GestureController } from './GestureController';
 
