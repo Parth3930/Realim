@@ -7,7 +7,6 @@ import { get, set } from 'idb-keyval';
 import {
     Type,
     Image as ImageIcon,
-    Code,
     StickyNote,
     MousePointer2,
     Eraser,
@@ -85,6 +84,46 @@ export function Board({ roomId }: BoardProps) {
         }, 1000);
         return () => clearTimeout(timer);
     }, [store.elements, roomId]);
+
+    // Auto-center on latest element when joining/loading
+    const hasAutoCenteredRef = useRef(false);
+    useEffect(() => {
+        // Only auto-center once when elements first load
+        if (hasAutoCenteredRef.current) return;
+
+        const elements = Object.values(store.elements);
+        if (elements.length === 0) return;
+
+        // Wait a bit for all elements to load
+        const timer = setTimeout(() => {
+            const allElements = Object.values(store.elements);
+            if (allElements.length === 0) return;
+
+            // Try to find latest by timestamp
+            let latest = allElements
+                .filter(el => el.createdAt)
+                .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+
+            // Fallback to any element if no timestamps
+            if (!latest) {
+                latest = allElements[allElements.length - 1];
+            }
+
+            if (latest) {
+                // Center viewport on this element
+                const centerX = window.innerWidth / 2;
+                const centerY = window.innerHeight / 2;
+                setViewport({
+                    x: centerX - latest.x,
+                    y: centerY - latest.y,
+                    scale: 1
+                });
+                hasAutoCenteredRef.current = true;
+            }
+        }, 500); // Increased delay to ensure elements are loaded
+
+        return () => clearTimeout(timer);
+    }, [store.elements]); // Trigger when elements change
 
     // BLOCK RENDER IF ACCESS DENIED
     if (accessDenied) {
@@ -261,6 +300,7 @@ export function Board({ roomId }: BoardProps) {
             y: pendingClick.y,
             content,
             createdBy: store.userId,
+            createdAt: Date.now(), // Add timestamp for auto-scroll
         };
         store.addElement(newElement);
         broadcast({ type: 'ADD_ELEMENT', payload: newElement });
@@ -276,6 +316,8 @@ export function Board({ roomId }: BoardProps) {
             store.deleteElement(id);
             broadcast({ type: 'DELETE_ELEMENT', payload: { id } });
         });
+        // Clear persisted storage as well
+        set(`realim_room_${roomId}`, {});
     };
 
     const handleDeleteElement = (id: string) => {
@@ -292,9 +334,9 @@ export function Board({ roomId }: BoardProps) {
                     </DialogHeader>
                     <div className="py-4">
                         <Label className="mb-2 block text-muted-foreground">
-                            {pendingTool === 'image' ? 'Image Link' : pendingTool === 'code' ? 'Code' : 'Text'}
+                            {pendingTool === 'image' ? 'Image Link' : 'Text'}
                         </Label>
-                        {pendingTool === 'code' || pendingTool === 'text' || pendingTool === 'sticky' ? (
+                        {pendingTool === 'text' || pendingTool === 'sticky' ? (
                             <textarea
                                 className="flex min-h-[120px] w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                                 value={inputValue}
@@ -329,14 +371,14 @@ export function Board({ roomId }: BoardProps) {
             <div className="absolute bottom-6 left-6 z-50">
                 <Button
                     onClick={() => {
-                        navigator.clipboard.writeText(window.location.href);
+                        const inviteUrl = `${window.location.origin}/board/${roomId}`;
+                        navigator.clipboard.writeText(inviteUrl);
                         const btn = document.getElementById('invite-text');
                         if (btn) btn.innerText = 'Copied!';
                         setTimeout(() => { if (btn) btn.innerText = 'Invite Friend'; }, 2000);
                     }}
-                    className="glass border-white/10 hover:bg-white/10 text-white gap-2 transition-all shadow-xl"
+                    className="glass border-white/10 shadow-2xl hover:bg-white/5"
                 >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
                     <span id="invite-text">Invite Friend</span>
                 </Button>
             </div>
@@ -358,10 +400,13 @@ export function Board({ roomId }: BoardProps) {
                 <div className="w-px bg-white/10 mx-1 h-8 self-center" />
                 <ToolButton active={activeTool === 'text'} onClick={() => setActiveTool('text')} icon={<Type size={18} />} label="Text" />
                 <ToolButton active={activeTool === 'image'} onClick={() => setActiveTool('image')} icon={<ImageIcon size={18} />} label="Image" />
-                <ToolButton active={activeTool === 'code'} onClick={() => setActiveTool('code')} icon={<Code size={18} />} label="Code" />
                 <ToolButton active={activeTool === 'sticky'} onClick={() => setActiveTool('sticky')} icon={<StickyNote size={18} />} label="Note" />
-                <div className="w-px bg-destructive/20 mx-1 h-8 self-center" />
-                <button onClick={handleClearBoard} className="p-2 rounded-xl hover:bg-destructive/20 text-destructive/80 hover:text-destructive transition-colors"><Eraser size={18} /></button>
+                {store.isHost && (
+                    <>
+                        <div className="w-px bg-destructive/20 mx-1 h-8 self-center" />
+                        <button onClick={handleClearBoard} className="p-2 rounded-xl hover:bg-destructive/20 text-destructive/80 hover:text-destructive transition-colors"><Eraser size={18} /></button>
+                    </>
+                )}
             </div>
 
 
@@ -843,7 +888,6 @@ function DraggableElement({
         >
             <div className={cn(
                 "relative rounded-xl border-2 border-transparent transition-transform",
-                data.type === 'code' && "bg-[#0d1117] font-mono text-sm border-white/10 shadow-xl overflow-hidden min-w-[300px]",
                 data.type === 'text' && "bg-transparent min-w-[50px] p-2 hover:bg-white/5 rounded-lg hover:border-white/10",
                 data.type === 'sticky' && "bg-[#fef9c3] text-black shadow-lg rotate-1 font-[Patrick_Hand] text-2xl w-[220px] h-[220px] flex items-center justify-center p-6 text-center leading-tight hover:rotate-0",
                 data.type === 'image' && "border-none",
@@ -860,22 +904,6 @@ function DraggableElement({
                 {data.type === 'text' && (
                     <div className="outline-none whitespace-pre-wrap max-w-md font-medium text-lg leading-relaxed text-balance">
                         {data.content}
-                    </div>
-                )}
-                {data.type === 'code' && (
-                    <div className="w-full">
-                        <div className="flex items-center gap-2 px-3 py-2 bg-[#161b22] border-b border-white/10">
-                            <div className="flex gap-1.5">
-                                <span className="w-2.5 h-2.5 rounded-full bg-[#fa7970]" />
-                                <span className="w-2.5 h-2.5 rounded-full bg-[#faa356]" />
-                                <span className="w-2.5 h-2.5 rounded-full bg-[#7ce38b]" />
-                            </div>
-                        </div>
-                        <div className="p-4 overflow-x-auto bg-[#0d1117]">
-                            <pre className="text-sm font-mono text-[#c9d1d9] selection:bg-white/20 select-text">
-                                <code className="outline-none block">{data.content}</code>
-                            </pre>
-                        </div>
                     </div>
                 )}
                 {data.type === 'sticky' && (

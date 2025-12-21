@@ -36,6 +36,11 @@ export function useP2P(roomId: string | null) {
         const hostPassword = localStorage.getItem(`room_pass_${roomId}`);
         const initialJoinPass = sessionStorage.getItem(`join_pass_${roomId}`);
 
+        // Assume we're the host until proven otherwise
+        // If we receive SYNC_RESP, we're joining someone else's room (guest)
+        // If we don't receive it, we're creating the room (host)
+        store.setIsHost(true);
+
         // --- Event Handlers ---
 
         room.onPeerJoin((peerId) => {
@@ -80,6 +85,8 @@ export function useP2P(roomId: string | null) {
                     break;
 
                 case 'SYNC_RESP':
+                    // We received data from host, so we're a guest
+                    store.setIsHost(false);
                     store.setElements(data.payload.elements);
                     setAccessDenied(false); // Success!
                     break;

@@ -4,18 +4,19 @@ import { nanoid } from 'nanoid';
 
 // --- Types ---
 
-export type ElementType = 'text' | 'image' | 'code' | 'sticky';
+export type ElementType = 'text' | 'image' | 'sticky';
 
 export interface BoardElement {
     id: string;
     type: ElementType;
     x: number;
     y: number;
-    content: string;
+    content: string; // For draw type, this stores SVG path data
     width?: number;
     height?: number;
     rotation?: number;
     createdBy: string;
+    createdAt?: number; // Timestamp for sorting/auto-scroll
 }
 
 export interface UserCursor {

@@ -31,11 +31,11 @@ import { Edit2 } from "lucide-react";
 				class="space-y-8 p-10 glass rounded-3xl border border-white/10 shadow-2xl relative order-2 md:order-1"
 			>
 				{/* Header */}
-				<div class="space-y-4 text-center md:text-left">
+				<div class="space-y-4 text-center">
 					<div
 						class="inline-flex items-center justify-center p-3 bg-white/5 rounded-2xl mb-2 ring-1 ring-white/10 shadow-lg"
 					>
-						<span class="text-4xl shadow-inner">🔮</span>
+						<img src="/logo.svg" alt="Realim" class="w-12 h-12" />
 					</div>
 					<div>
 						<h1
@@ -50,7 +50,7 @@ import { Edit2 } from "lucide-react";
 				</div>
 
 				{/* Username Config */}
-				<div class="flex flex-col md:items-start items-center gap-2">
+				<div class="flex flex-col items-center gap-2">
 					<label
 						class="text-xs uppercase tracking-wider text-muted-foreground font-semibold"
 						>Your Identity</label
@@ -227,6 +227,47 @@ import { Edit2 } from "lucide-react";
 				</div>
 			</div>
 		</div>
+
+		{/* Support Section */}
+		<div class="absolute bottom-6 left-0 right-0 z-10 flex justify-center">
+			<a
+				href="https://buymeacoffee.com/Rover01"
+				target="_blank"
+				rel="noopener noreferrer"
+				class="group flex items-center gap-3 px-6 py-3 glass rounded-2xl border border-white/10 hover:border-primary/50 shadow-xl transition-all hover:scale-105"
+			>
+				<div class="flex items-center gap-2">
+					<span class="text-2xl group-hover:animate-bounce">☕</span>
+					<div class="flex flex-col">
+						<span
+							class="text-sm font-medium text-white/90 group-hover:text-white"
+						>
+							Enjoying Realim?
+						</span>
+						<span
+							class="text-xs text-muted-foreground group-hover:text-primary"
+						>
+							Buy me a coffee to keep the magic alive ✨
+						</span>
+					</div>
+				</div>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					width="16"
+					height="16"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					class="text-muted-foreground group-hover:text-primary transition-colors"
+				>
+					<path d="M7 7h10v10"></path>
+					<path d="M7 17 17 7"></path>
+				</svg>
+			</a>
+		</div>
 	</main>
 </Layout>
 
@@ -286,11 +327,36 @@ import { Edit2 } from "lucide-react";
                                     <span class="text-xs text-muted-foreground">Last visited ${new Date(room.lastVisited).toLocaleDateString()}</span>
                                 </div>
                             </div>
-                            <div class="relative z-10 p-2 bg-white/5 rounded-lg text-muted-foreground group-hover:text-primary group-hover:bg-white/10 transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                            <div class="relative z-10 flex items-center gap-2">
+                                <button class="delete-room-btn p-2 bg-red-500/10 hover:bg-red-500/20 rounded-lg text-red-500 hover:text-red-400 transition-colors" data-room-id="${room.id}">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                                    </svg>
+                                </button>
+                                <div class="p-2 bg-white/5 rounded-lg text-muted-foreground group-hover:text-primary group-hover:bg-white/10 transition-colors">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                                </div>
                             </div>
                         `;
 						recentList?.appendChild(el);
+
+						// Add delete handler
+						const deleteBtn = el.querySelector(".delete-room-btn");
+						deleteBtn?.addEventListener("click", (e) => {
+							e.preventDefault();
+							e.stopPropagation();
+
+							const roomId =
+								deleteBtn.getAttribute("data-room-id");
+							if (
+								roomId &&
+								confirm(
+									`Delete room "${roomId}" from your recent list?`,
+								)
+							) {
+								deleteRoom(roomId);
+							}
+						});
 					});
 				}
 			}
@@ -320,6 +386,26 @@ import { Edit2 } from "lucide-react";
 			localStorage.setItem("realim-storage", JSON.stringify(data));
 		} catch (e) {
 			console.error("Error saving store", e);
+		}
+	}
+
+	function deleteRoom(roomId: string) {
+		try {
+			const storageFn = localStorage.getItem("realim-storage");
+			if (!storageFn) return;
+
+			const data = JSON.parse(storageFn);
+			if (data.state && data.state.savedRooms) {
+				data.state.savedRooms = data.state.savedRooms.filter(
+					(room: any) => room.id !== roomId,
+				);
+				localStorage.setItem("realim-storage", JSON.stringify(data));
+
+				// Reload page to refresh the list
+				window.location.reload();
+			}
+		} catch (e) {
+			console.error("Error deleting room", e);
 		}
 	}
 
