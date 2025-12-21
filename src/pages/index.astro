@@ -1,0 +1,239 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { nanoid } from "nanoid";
+import { Edit2, Settings, Key } from "lucide-react";
+---
+
+<Layout title="Realim | P2P Space">
+	<main
+		class="w-full h-screen flex flex-col items-center justify-center relative overflow-hidden bg-background text-foreground"
+	>
+		{/* Background Decor */}
+		<div class="absolute inset-0 z-0">
+			<div
+				class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/20 rounded-full blur-[140px] animate-pulse"
+			>
+			</div>
+			{/* Grid */}
+			<div
+				class="absolute inset-0 z-0 opacity-[0.03]"
+				style={{
+					backgroundImage: `linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)`,
+					backgroundSize: "40px 40px",
+				}}
+			>
+			</div>
+		</div>
+
+		<div
+			class="z-10 text-center space-y-8 p-12 glass rounded-3xl max-w-lg w-full mx-4 border border-white/10 shadow-2xl relative"
+		>
+			{/* Header */}
+			<div className="space-y-2">
+				<div
+					class="inline-flex items-center justify-center p-3 bg-white/5 rounded-2xl mb-4 ring-1 ring-white/10 shadow-lg"
+				>
+					<span class="text-4xl">🔮</span>
+				</div>
+				<h1
+					class="text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-b from-white to-white/50 tracking-tight"
+				>
+					Realim
+				</h1>
+				<p class="text-muted-foreground text-lg">
+					Ephemeral, serverless, P2P collaboration spaces.
+				</p>
+			</div>
+
+			{/* Username Config */}
+			<div class="flex flex-col items-center gap-2">
+				<label
+					class="text-xs uppercase tracking-wider text-muted-foreground font-semibold"
+					>Your Identity</label
+				>
+				<div
+					class="flex items-center gap-2 bg-black/30 p-2 pl-4 rounded-xl border border-white/10 group hover:border-primary/50 transition-colors w-full max-w-xs"
+				>
+					<div
+						class="w-2 h-2 rounded-full bg-green-500 animate-pulse"
+						id="status-dot"
+					>
+					</div>
+					<input
+						id="username-input"
+						type="text"
+						value="Loading..."
+						class="bg-transparent border-none outline-none text-sm font-medium w-full text-center group-hover:text-primary transition-colors cursor-text"
+					/>
+					<Edit2 size={14} class="opacity-50 mr-2" />
+				</div>
+			</div>
+
+			<div class="grid gap-6">
+				{/* Create Section */}
+				<div class="space-y-3">
+					<div class="flex items-center gap-2">
+						<input
+							id="create-password"
+							type="password"
+							placeholder="Optional Room Password"
+							class="flex-1 h-10 rounded-lg border border-white/10 bg-black/20 px-3 text-sm focus:ring-2 focus:ring-primary outline-none transition-all"
+						/>
+					</div>
+					<button
+						id="create-btn"
+						class="group relative w-full inline-flex h-12 items-center justify-center overflow-hidden rounded-xl bg-primary px-8 font-medium text-white transition-all duration-300 hover:bg-primary/90 hover:scale-[1.02] shadow-[0_0_40px_-10px_rgba(139,92,246,0.5)]"
+					>
+						<span class="relative flex items-center gap-2">
+							Create New Space
+							<svg
+								data-lucide="arrow-right"
+								class="w-4 h-4 transition-transform group-hover:translate-x-1"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								><path d="M5 12h14"></path><path
+									d="m12 5 7 7-7 7"></path></svg
+							>
+						</span>
+					</button>
+				</div>
+
+				<div class="relative">
+					<div class="absolute inset-0 flex items-center">
+						<span class="w-full border-t border-white/10"></span>
+					</div>
+					<div class="relative flex justify-center text-xs uppercase">
+						<span class="bg-[#121212] px-2 text-muted-foreground"
+							>Or join existing</span
+						>
+					</div>
+				</div>
+
+				<div class="flex gap-2">
+					<input
+						id="join-input"
+						type="text"
+						placeholder="Room ID"
+						class="flex h-12 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-all hover:bg-black/30"
+					/>
+					<input
+						id="join-password"
+						type="password"
+						placeholder="Password?"
+						class="flex h-12 w-24 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-all hover:bg-black/30"
+					/>
+					<button
+						id="join-btn"
+						class="h-12 w-12 shrink-0 inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:text-primary transition-colors"
+					>
+						<svg
+							data-lucide="log-in"
+							class="w-5 h-5"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"
+							></path><polyline points="10 17 15 12 10 7"
+							></polyline><line x1="15" y1="12" x2="3" y2="12"
+							></line></svg
+						>
+					</button>
+				</div>
+			</div>
+		</div>
+	</main>
+</Layout>
+
+<script>
+	import { nanoid } from "nanoid";
+
+	// Client-side logic to interface with Zustand store directly via localStorage
+	// Since this is an Astro Static page, we can't easily import the store hook directly in the script tag
+	// without hydration. But we can read/write localStorage "realim-storage".
+
+	const usernameInput = document.getElementById(
+		"username-input",
+	) as HTMLInputElement;
+	const createBtn = document.getElementById("create-btn");
+	const createPass = document.getElementById(
+		"create-password",
+	) as HTMLInputElement;
+	const joinInput = document.getElementById("join-input") as HTMLInputElement;
+	const joinPass = document.getElementById(
+		"join-password",
+	) as HTMLInputElement;
+	const joinBtn = document.getElementById("join-btn");
+
+	// Load User
+	try {
+		const storageFn = localStorage.getItem("realim-storage");
+		if (storageFn) {
+			const parsed = JSON.parse(storageFn);
+			if (parsed.state && parsed.state.username) {
+				usernameInput.value = parsed.state.username;
+			}
+		}
+	} catch (e) {
+		console.error("Error reading store", e);
+	}
+
+	// Save User Helper
+	const saveUser = (name: string) => {
+		try {
+			const storageFn = localStorage.getItem("realim-storage");
+			let data = storageFn
+				? JSON.parse(storageFn)
+				: { state: { userId: nanoid(10), elements: {} }, version: 0 };
+			data.state.username = name;
+			localStorage.setItem("realim-storage", JSON.stringify(data));
+		} catch (e) {
+			console.error("Error saving store", e);
+		}
+	};
+
+	usernameInput?.addEventListener("input", (e) => {
+		saveUser((e.target as HTMLInputElement).value);
+	});
+
+	// Create Logic
+	createBtn?.addEventListener("click", () => {
+		const id = nanoid(10); // Custom short ID
+		const pass = createPass.value;
+		if (pass) {
+			// Store password for this room locally (Host logic only)
+			localStorage.setItem(`room_pass_${id}`, pass);
+		}
+		window.location.href = `/board/${id}`;
+	});
+
+	// Join Logic
+	const handleJoin = () => {
+		const id = joinInput.value.trim();
+		if (!id) return;
+
+		const pass = joinPass.value;
+		if (pass) {
+			// We need to pass this password to the board page.
+			// We can use sessionStorage to pass it securely-ish to the next page load
+			sessionStorage.setItem(`join_pass_${id}`, pass);
+		}
+		window.location.href = `/board/${id}`;
+	};
+
+	joinBtn?.addEventListener("click", handleJoin);
+	joinInput?.addEventListener(
+		"keydown",
+		(e) => e.key === "Enter" && handleJoin(),
+	);
+	joinPass?.addEventListener(
+		"keydown",
+		(e) => e.key === "Enter" && handleJoin(),
+	);
+</script>
