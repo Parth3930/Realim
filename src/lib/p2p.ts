@@ -36,10 +36,12 @@ export function useP2P(roomId: string | null) {
         const hostPassword = localStorage.getItem(`room_pass_${roomId}`);
         const initialJoinPass = sessionStorage.getItem(`join_pass_${roomId}`);
 
-        // Assume we're the host until proven otherwise
-        // If we receive SYNC_RESP, we're joining someone else's room (guest)
-        // If we don't receive it, we're creating the room (host)
-        store.setIsHost(true);
+        // Determine if we're the host based on:
+        // 1. We have a host password stored (we created the room with password)
+        // 2. OR we have elements in IndexedDB (we created content before)
+        // If neither, we'll determine based on who connects first
+        const isCreator = !!hostPassword;
+        store.setIsHost(isCreator);
 
         // --- Event Handlers ---
 
@@ -48,14 +50,19 @@ export function useP2P(roomId: string | null) {
             store.addPeer(peerId);
             setIsConnected(true);
 
+            // Send our cursor position to the new peer
             sendAction({
                 type: 'CURSOR_MOVE',
                 payload: { x: 0, y: 0, userId: store.userId, username: store.username, color: '#8b5cf6' }
             }, peerId);
 
-            // Host logic: Check if we have password protection
-            if (!hostPassword && Object.keys(store.elements).length > 0) {
-                sendAction({ type: 'SYNC_RESP', payload: { elements: store.elements } }, peerId);
+            // If we're the host (have content or password), send sync immediately
+            if (store.isHost || Object.keys(store.elements).length > 0) {
+                if (!hostPassword) {
+                    // No password, share freely
+                    sendAction({ type: 'SYNC_RESP', payload: { elements: store.elements } }, peerId);
+                    store.setIsHost(true); // We're sharing, so we're the host
+                }
             }
         });
 
@@ -68,27 +75,29 @@ export function useP2P(roomId: string | null) {
         getAction((data: Action, peerId) => {
             switch (data.type) {
                 case 'SYNC_REQ':
+                    // Someone is requesting sync - we must be the host if we respond
                     if (hostPassword) {
                         if (data.payload?.password === hostPassword) {
-                            if (Object.keys(store.elements).length > 0) {
-                                sendAction({ type: 'SYNC_RESP', payload: { elements: store.elements } }, peerId);
-                            }
+                            sendAction({ type: 'SYNC_RESP', payload: { elements: store.elements } }, peerId);
+                            store.setIsHost(true);
                         } else {
                             sendAction({ type: 'ACCESS_DENIED', payload: { reason: 'Incorrect Password' } }, peerId);
                         }
                     } else {
-                        // Open Board - share freely
-                        if (Object.keys(store.elements).length > 0) {
+                        // Open Board - share freely (even if empty)
+                        // Only respond if we actually have content (meaning we're the host)
+                        if (Object.keys(store.elements).length > 0 || store.isHost) {
                             sendAction({ type: 'SYNC_RESP', payload: { elements: store.elements } }, peerId);
+                            store.setIsHost(true);
                         }
                     }
                     break;
 
                 case 'SYNC_RESP':
-                    // We received data from host, so we're a guest
+                    // We received data from host, so we're definitely a guest
                     store.setIsHost(false);
                     store.setElements(data.payload.elements);
-                    setAccessDenied(false); // Success!
+                    setAccessDenied(false);
                     break;
 
                 case 'ACCESS_DENIED':

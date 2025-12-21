@@ -66,10 +66,13 @@ export function Board({ roomId }: BoardProps) {
     useEffect(() => {
         store.setRoomId(roomId);
         get(`realim_room_${roomId}`).then((val) => {
-            if (val && Object.keys(store.elements).length === 0) {
-                // Load saved state to store
-                // We don't have a bulk set, so manual add.
-                Object.values(val).forEach((el: any) => store.addElement(el));
+            if (val && Object.keys(val).length > 0) {
+                // We have saved content - we're the host of this board
+                store.setIsHost(true);
+                if (Object.keys(store.elements).length === 0) {
+                    // Load saved state to store
+                    Object.values(val).forEach((el: any) => store.addElement(el));
+                }
             }
         });
         store.saveRoom(roomId);
@@ -377,8 +380,9 @@ export function Board({ roomId }: BoardProps) {
                         if (btn) btn.innerText = 'Copied!';
                         setTimeout(() => { if (btn) btn.innerText = 'Invite Friend'; }, 2000);
                     }}
-                    className="glass border-white/10 shadow-2xl hover:bg-white/5"
+                    className="glass border-white/10 shadow-2xl hover:bg-white/10 text-white gap-2"
                 >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
                     <span id="invite-text">Invite Friend</span>
                 </Button>
             </div>
