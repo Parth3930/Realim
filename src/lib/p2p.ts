@@ -1,11 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { joinRoom, selfId } from 'trystero';
 import { useBoardStore, type BoardElement, type UserCursor } from './store';
 import { nanoid } from 'nanoid';
 
 // Action Types for P2P Messages
 type Action =
-    | { type: 'SYNC_REQ'; payload?: { password?: string } } // New peer asking for data, optionally with password
+    | { type: 'SYNC_REQ'; payload?: { password?: string } }
     | { type: 'SYNC_RESP'; payload: { elements: Record<string, BoardElement> } }
     | { type: 'ACCESS_DENIED'; payload: { reason: string } }
     | { type: 'ADD_ELEMENT'; payload: BoardElement }
@@ -16,6 +16,11 @@ type Action =
 export function useP2P(roomId: string | null) {
     const store = useBoardStore();
     const roomRef = useRef<any>(null);
+    const [accessDenied, setAccessDenied] = useState(false);
+    const [isConnected, setIsConnected] = useState(false);
+
+    // Persist sendAction reference to call it outside
+    const sendActionRef = useRef<any>(null);
 
     useEffect(() => {
         if (!roomId) return;
@@ -24,26 +29,26 @@ export function useP2P(roomId: string | null) {
         const room = joinRoom(config, roomId);
         roomRef.current = room;
 
-        const [sendAction, getAction] = room.makeAction<Action>('board_action');
+        // Use 'any' to bypass strict JSON constraints on Union types
+        const [sendAction, getAction] = room.makeAction<any>('board_action');
+        sendActionRef.current = sendAction;
 
-        // Check for locally stored passwords
         const hostPassword = localStorage.getItem(`room_pass_${roomId}`);
-        const joinPassword = sessionStorage.getItem(`join_pass_${roomId}`);
+        const initialJoinPass = sessionStorage.getItem(`join_pass_${roomId}`);
 
         // --- Event Handlers ---
 
         room.onPeerJoin((peerId) => {
             console.log(`Peer ${peerId} joined`);
             store.addPeer(peerId);
+            setIsConnected(true);
 
-            // For ephemeral data (cursor), broadcast immediately
             sendAction({
                 type: 'CURSOR_MOVE',
                 payload: { x: 0, y: 0, userId: store.userId, username: store.username, color: '#8b5cf6' }
-            });
+            }, peerId);
 
-            // Proactively share state ONLY if NO password is set.
-            // If password is set, wait for explicit SYNC_REQ with password.
+            // Host logic: Check if we have password protection
             if (!hostPassword && Object.keys(store.elements).length > 0) {
                 sendAction({ type: 'SYNC_RESP', payload: { elements: store.elements } }, peerId);
             }
@@ -55,10 +60,9 @@ export function useP2P(roomId: string | null) {
             store.removeCursor(peerId);
         });
 
-        getAction((data, peerId) => {
+        getAction((data: Action, peerId) => {
             switch (data.type) {
                 case 'SYNC_REQ':
-                    // Check Password Logic
                     if (hostPassword) {
                         if (data.payload?.password === hostPassword) {
                             if (Object.keys(store.elements).length > 0) {
@@ -68,7 +72,7 @@ export function useP2P(roomId: string | null) {
                             sendAction({ type: 'ACCESS_DENIED', payload: { reason: 'Incorrect Password' } }, peerId);
                         }
                     } else {
-                        // Open Board
+                        // Open Board - share freely
                         if (Object.keys(store.elements).length > 0) {
                             sendAction({ type: 'SYNC_RESP', payload: { elements: store.elements } }, peerId);
                         }
@@ -77,12 +81,12 @@ export function useP2P(roomId: string | null) {
 
                 case 'SYNC_RESP':
                     store.setElements(data.payload.elements);
+                    setAccessDenied(false); // Success!
                     break;
 
                 case 'ACCESS_DENIED':
-                    alert(`Access Denied: ${data.payload.reason}`);
-                    // Maybe redirect home?
-                    window.location.href = '/';
+                    console.warn(`Access Denied: ${data.payload.reason}`);
+                    setAccessDenied(true);
                     break;
 
                 case 'ADD_ELEMENT':
@@ -103,9 +107,8 @@ export function useP2P(roomId: string | null) {
             }
         });
 
-        // --- Initial Sync ---
-        // Ask for data upon joining, sending password if we have one
-        sendAction({ type: 'SYNC_REQ', payload: { password: joinPassword || undefined } });
+        // Initial Sync Request
+        sendAction({ type: 'SYNC_REQ', payload: { password: initialJoinPass || undefined } });
 
         return () => {
             room.leave();
@@ -113,11 +116,17 @@ export function useP2P(roomId: string | null) {
     }, [roomId]);
 
     const broadcast = (action: Action) => {
-        if (roomRef.current) {
-            const [send] = roomRef.current.makeAction('board_action');
-            send(action);
+        if (sendActionRef.current) {
+            sendActionRef.current(action);
         }
     };
 
-    return { broadcast, selfId };
+    const retryJoin = (password: string) => {
+        setAccessDenied(false); // Reset UI state while checking
+        if (sendActionRef.current) {
+            sendActionRef.current({ type: 'SYNC_REQ', payload: { password } });
+        }
+    };
+
+    return { broadcast, selfId, accessDenied, retryJoin, isConnected };
 }

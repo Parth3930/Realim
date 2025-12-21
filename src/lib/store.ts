@@ -26,6 +26,11 @@ export interface UserCursor {
     color: string;
 }
 
+export interface SavedRoom {
+    id: string;
+    lastVisited: number;
+}
+
 interface BoardState {
     roomId: string | null;
     username: string;
@@ -38,6 +43,9 @@ interface BoardState {
     // Ephemeral Data
     cursors: Record<string, UserCursor>;
     peers: string[];
+
+    // Saved Rooms (Recent 5)
+    savedRooms: SavedRoom[];
 
     // Actions
     setRoomId: (id: string) => void;
@@ -54,6 +62,8 @@ interface BoardState {
     setElements: (elements: Record<string, BoardElement>) => void;
     addPeer: (peerId: string) => void;
     removePeer: (peerId: string) => void;
+
+    saveRoom: (id: string) => void;
 }
 
 const ADJECTIVES = ['Happy', 'Bright', 'Glow', 'Neon', 'Swift', 'Silent', 'Cosmic', 'Solar', 'Lunar', 'Vivid'];
@@ -78,6 +88,7 @@ export const useBoardStore = create<BoardState>()(
             elements: {},
             cursors: {},
             peers: [],
+            savedRooms: [],
 
             setRoomId: (roomId) => set({ roomId }),
             setUserInfo: (username) => set({ username }),
@@ -123,6 +134,13 @@ export const useBoardStore = create<BoardState>()(
 
             addPeer: (peerId) => set((state) => ({ peers: [...state.peers, peerId] })),
             removePeer: (peerId) => set((state) => ({ peers: state.peers.filter((p) => p !== peerId) })),
+
+            saveRoom: (id) => set((state) => {
+                // Add or move to top, limit to 5
+                const existing = state.savedRooms.filter(r => r.id !== id);
+                const updated = [{ id, lastVisited: Date.now() }, ...existing].slice(0, 5);
+                return { savedRooms: updated };
+            }),
         }),
         {
             name: 'realim-storage',
@@ -131,7 +149,8 @@ export const useBoardStore = create<BoardState>()(
                 userId: state.userId,
                 // We persist username so it doesn't randomise on reload
                 username: state.username,
-                // elements: state.elements, // Keeping elements persisted
+                elements: state.elements,
+                savedRooms: state.savedRooms
             }),
         }
     )

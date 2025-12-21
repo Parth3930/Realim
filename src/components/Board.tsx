@@ -13,7 +13,8 @@ import {
     X,
     Hand,
     Minus,
-    Plus
+    Plus,
+    Key
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -27,7 +28,7 @@ interface BoardProps {
 
 export function Board({ roomId }: BoardProps) {
     const store = useBoardStore();
-    const { broadcast } = useP2P(roomId);
+    const { broadcast, accessDenied, retryJoin, isConnected } = useP2P(roomId);
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Viewport State (Infinite Canvas)
@@ -37,6 +38,9 @@ export function Board({ roomId }: BoardProps) {
     // Local state
     const [activeTool, setActiveTool] = useState<ElementType | 'select' | 'hand'>('select');
 
+    // Passcode Challenge State
+    const [passwordInput, setPasswordInput] = useState('');
+
     // Modal State
     const [modalOpen, setModalOpen] = useState(false);
     const [pendingTool, setPendingTool] = useState<ElementType | null>(null);
@@ -45,7 +49,36 @@ export function Board({ roomId }: BoardProps) {
 
     useEffect(() => {
         store.setRoomId(roomId);
+        store.saveRoom(roomId);
     }, [roomId]);
+
+    // BLOCK RENDER IF ACCESS DENIED
+    if (accessDenied) {
+        return (
+            <div className="w-full h-screen flex items-center justify-center bg-[#0f0f11] text-foreground bg-dot-pattern">
+                <div className="glass p-8 rounded-2xl border border-white/10 shadow-2xl max-w-md w-full text-center space-y-6">
+                    <div className="mx-auto w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center text-red-500">
+                        <Key size={24} />
+                    </div>
+                    <h2 className="text-2xl font-bold">Room Locked</h2>
+                    <p className="text-muted-foreground">This room is protected by a password.</p>
+
+                    <div className="flex gap-2">
+                        <Input
+                            type="password"
+                            placeholder="Enter Password..."
+                            value={passwordInput}
+                            onChange={(e) => setPasswordInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && retryJoin(passwordInput)}
+                            className="bg-black/20 border-white/10"
+                            autoFocus
+                        />
+                        <Button onClick={() => retryJoin(passwordInput)}>Unlock</Button>
+                    </div>
+                </div>
+            </div>
+        )
+    }
 
     // --- Coordinate Systems ---
     const toWorld = (screenX: number, screenY: number) => {
@@ -65,48 +98,60 @@ export function Board({ roomId }: BoardProps) {
 
     // --- Handlers ---
 
-    const handleWheel = (e: React.WheelEvent) => {
-        // Zoom logic
-        if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            const zoomSensitivity = 0.001;
-            const delta = -e.deltaY * zoomSensitivity;
-            const newScale = Math.min(Math.max(viewport.scale + delta, 0.1), 5);
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
 
-            // Zoom towards cursor
-            const rect = containerRef.current?.getBoundingClientRect();
-            if (!rect) return;
+        const onWheel = (e: WheelEvent) => {
+            e.preventDefault(); // Stop browser zoom / scroll
 
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
+            if (e.ctrlKey || e.metaKey) {
+                // Standard Pinch-Zoom trackpad behavior
+                const zoomSensitivity = 0.002;
+                const delta = -e.deltaY * zoomSensitivity;
 
-            // Calculate world point before zoom
-            const worldPoint = toWorld(mouseX, mouseY);
+                setViewport(prev => {
+                    const newScale = Math.min(Math.max(prev.scale + delta, 0.1), 5);
+                    // Simple center zoom for trackpad to avoid complex cursor calc issues for now, or refine it.
+                    // Or just keep existing logic but prevent default.
+                    return { ...prev, scale: newScale };
+                });
+            } else {
+                // Mouse Wheel -> Zoom
+                const zoomSensitivity = 0.001;
+                const delta = -e.deltaY * zoomSensitivity;
 
-            // New viewport position to keep worldPoint under mouse
-            // mouseX = worldPoint.x * newScale + newViewport.x
-            // newViewport.x = mouseX - worldPoint.x * newScale
+                setViewport(prev => {
+                    const newScale = Math.min(Math.max(prev.scale + delta, 0.1), 5);
+                    // Keep same mouse position:
+                    // worldX = (mouseX - prev.x) / prev.scale
+                    // newX = mouseX - worldX * newScale
+                    const rect = container.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
 
-            setViewport(prev => ({
-                x: mouseX - worldPoint.x * newScale,
-                y: mouseY - worldPoint.y * newScale,
-                scale: newScale
-            }));
-        } else {
-            // Pan Logic (if not zooming)
-            setViewport(prev => ({
-                ...prev,
-                x: prev.x - e.deltaX,
-                y: prev.y - e.deltaY
-            }));
-        }
-    };
+                    const worldX = (mouseX - prev.x) / prev.scale;
+                    const worldY = (mouseY - prev.y) / prev.scale;
+
+                    return {
+                        x: mouseX - worldX * newScale,
+                        y: mouseY - worldY * newScale,
+                        scale: newScale
+                    };
+                });
+            }
+        };
+
+        container.addEventListener('wheel', onWheel, { passive: false });
+        return () => container.removeEventListener('wheel', onWheel);
+    }, []);
+
+    // Removed React onWheel to avoid conflicts
 
     const handlePointerDown = (e: React.PointerEvent) => {
-        // If middle click or Hand tool or Select tool on background -> Pan
-        if (activeTool === 'hand' || e.button === 1 || activeTool === 'select') {
-            // Check if we clicked an element? (Handled by stopPropagation in element)
-            // If we are here, we clicked background.
+        // Pan on Middle Click OR Left Click + Space (simulated by activeTool check if we had it) OR Hand Tool
+        if (activeTool === 'hand' || e.button === 1) {
+            e.preventDefault();
             setIsPanning(true);
             const startX = e.clientX;
             const startY = e.clientY;
@@ -264,6 +309,23 @@ export function Board({ roomId }: BoardProps) {
                 <button onClick={() => setViewport(v => ({ ...v, scale: Math.max(v.scale - 0.1, 0.1) }))} className="p-2 hover:bg-white/10 rounded-lg"><Minus size={20} /></button>
             </div>
 
+            {/* Invite Button */}
+            <div className="absolute bottom-6 left-6 z-50">
+                <Button
+                    onClick={() => {
+                        navigator.clipboard.writeText(window.location.href);
+                        // Simple toast fallback
+                        const btn = document.getElementById('invite-text');
+                        if (btn) btn.innerText = 'Copied!';
+                        setTimeout(() => { if (btn) btn.innerText = 'Invite Friend'; }, 2000);
+                    }}
+                    className="glass border-white/10 hover:bg-white/10 text-white gap-2 transition-all shadow-xl"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
+                    <span id="invite-text">Invite Friend</span>
+                </Button>
+            </div>
+
             <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 glass px-2 py-2 rounded-2xl flex gap-1 shadow-2xl border border-white/10">
                 <ToolButton active={activeTool === 'select'} onClick={() => setActiveTool('select')} icon={<MousePointer2 size={18} />} label="Select" />
                 <ToolButton active={activeTool === 'hand'} onClick={() => setActiveTool('hand')} icon={<Hand size={18} />} label="Pan" />
@@ -283,7 +345,6 @@ export function Board({ roomId }: BoardProps) {
                     activeTool === 'hand' || isPanning ? "cursor-grabbing" : activeTool !== 'select' ? "cursor-crosshair" : "cursor-default"
                 )}
                 onMouseMove={handleMouseMove}
-                onWheel={handleWheel}
                 onPointerDown={handlePointerDown}
                 onClick={handleCanvasClick}
             >
