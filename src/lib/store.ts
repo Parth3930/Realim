@@ -1,6 +1,22 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
 import { nanoid } from 'nanoid';
+
+// Safe storage that only works in browser (prevents SSR crashes)
+const safeLocalStorage: StateStorage = {
+    getItem: (name: string): string | null => {
+        if (typeof window === 'undefined') return null;
+        return localStorage.getItem(name);
+    },
+    setItem: (name: string, value: string): void => {
+        if (typeof window === 'undefined') return;
+        localStorage.setItem(name, value);
+    },
+    removeItem: (name: string): void => {
+        if (typeof window === 'undefined') return;
+        localStorage.removeItem(name);
+    },
+};
 
 // --- Types ---
 
@@ -145,7 +161,7 @@ export const useBoardStore = create<BoardState>()(
         }),
         {
             name: 'realim-storage',
-            storage: createJSONStorage(() => localStorage),
+            storage: createJSONStorage(() => safeLocalStorage),
             partialize: (state) => ({
                 userId: state.userId,
                 // We persist username so it doesn't randomise on reload
