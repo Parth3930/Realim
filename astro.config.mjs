@@ -10,6 +10,9 @@ export default defineConfig({
   integrations: [react()],
 
   vite: {
-    plugins: [tailwindcss()]
+    plugins: [tailwindcss()],
+    server: {
+      allowedHosts: ['adaptor-leaves-vip-categories.trycloudflare.com']
+    }
   }
 });

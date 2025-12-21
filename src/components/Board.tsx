@@ -3,6 +3,7 @@ import { useBoardStore, type ElementType, type BoardElement } from '@/lib/store'
 import { useP2P } from '@/lib/p2p';
 import { nanoid } from 'nanoid';
 import { motion, AnimatePresence } from 'framer-motion';
+import { get, set } from 'idb-keyval';
 import {
     Type,
     Image as ImageIcon,
@@ -22,6 +23,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
+import { GestureController } from './GestureController';
+
 interface BoardProps {
     roomId: string;
 }
@@ -35,8 +38,21 @@ export function Board({ roomId }: BoardProps) {
     const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
     const [isPanning, setIsPanning] = useState(false);
 
+    // Refs for Gesture Logic (Stale Closure Prevention)
+    const viewportRef = useRef(viewport);
+    useEffect(() => { viewportRef.current = viewport; }, [viewport]);
+
     // Local state
     const [activeTool, setActiveTool] = useState<ElementType | 'select' | 'hand'>('select');
+    const [gestureMode, setGestureMode] = useState(false);
+    const [virtualCursor, setVirtualCursor] = useState<{ x: number, y: number, isPinching: boolean, isFist: boolean, landmarks?: any[], grabStatus?: 'grabbed' | 'miss' | null } | null>(null);
+    const lastGestureRef = useRef<{ x: number, y: number } | null>(null);
+    const grabbedElRef = useRef<{ id: string, offsetX: number, offsetY: number, element?: HTMLElement } | null>(null);
+    const wasPinchingRef = useRef(false);
+    const grabStatusRef = useRef<'grabbed' | 'miss' | null>(null);
+    const panVelocityRef = useRef({ x: 0, y: 0 });
+    const pinchReleaseCounterRef = useRef(0);
+    const fistActiveCounterRef = useRef(0);
 
     // Passcode Challenge State
     const [passwordInput, setPasswordInput] = useState('');
@@ -47,10 +63,28 @@ export function Board({ roomId }: BoardProps) {
     const [pendingClick, setPendingClick] = useState<{ x: number, y: number } | null>(null);
     const [inputValue, setInputValue] = useState('');
 
+    // Persistence: Load
     useEffect(() => {
         store.setRoomId(roomId);
+        get(`realim_room_${roomId}`).then((val) => {
+            if (val && Object.keys(store.elements).length === 0) {
+                // Load saved state to store
+                // We don't have a bulk set, so manual add.
+                Object.values(val).forEach((el: any) => store.addElement(el));
+            }
+        });
         store.saveRoom(roomId);
     }, [roomId]);
+
+    // Persistence: Save
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (Object.keys(store.elements).length > 0) {
+                set(`realim_room_${roomId}`, store.elements);
+            }
+        }, 1000);
+        return () => clearTimeout(timer);
+    }, [store.elements, roomId]);
 
     // BLOCK RENDER IF ACCESS DENIED
     if (accessDenied) {
@@ -81,8 +115,16 @@ export function Board({ roomId }: BoardProps) {
     }
 
     // --- Coordinate Systems ---
+    // Use Ref for Gesture Callbacks to avoid stale viewport
+    const toWorldRef = (screenX: number, screenY: number) => {
+        const v = viewportRef.current;
+        return {
+            x: (screenX - v.x) / v.scale,
+            y: (screenY - v.y) / v.scale
+        };
+    };
+
     const toWorld = (screenX: number, screenY: number) => {
-        // Offset by viewport position and scale
         return {
             x: (screenX - viewport.x) / viewport.scale,
             y: (screenY - viewport.y) / viewport.scale
@@ -98,41 +140,38 @@ export function Board({ roomId }: BoardProps) {
 
     // --- Handlers ---
 
+    const handleDragUpdate = (id: string, newWorldX: number, newWorldY: number, final: boolean) => {
+        if (final) {
+            store.updateElement(id, { x: newWorldX, y: newWorldY });
+            broadcast({ type: 'UPDATE_ELEMENT', payload: { id, updates: { x: newWorldX, y: newWorldY } } });
+        } else {
+            broadcast({ type: 'UPDATE_ELEMENT', payload: { id, updates: { x: newWorldX, y: newWorldY } } });
+        }
+    }
+
     useEffect(() => {
         const container = containerRef.current;
         if (!container) return;
 
         const onWheel = (e: WheelEvent) => {
-            e.preventDefault(); // Stop browser zoom / scroll
-
+            e.preventDefault();
             if (e.ctrlKey || e.metaKey) {
-                // Standard Pinch-Zoom trackpad behavior
                 const zoomSensitivity = 0.002;
                 const delta = -e.deltaY * zoomSensitivity;
-
                 setViewport(prev => {
                     const newScale = Math.min(Math.max(prev.scale + delta, 0.1), 5);
-                    // Simple center zoom for trackpad to avoid complex cursor calc issues for now, or refine it.
-                    // Or just keep existing logic but prevent default.
                     return { ...prev, scale: newScale };
                 });
             } else {
-                // Mouse Wheel -> Zoom
                 const zoomSensitivity = 0.001;
                 const delta = -e.deltaY * zoomSensitivity;
-
                 setViewport(prev => {
                     const newScale = Math.min(Math.max(prev.scale + delta, 0.1), 5);
-                    // Keep same mouse position:
-                    // worldX = (mouseX - prev.x) / prev.scale
-                    // newX = mouseX - worldX * newScale
                     const rect = container.getBoundingClientRect();
                     const mouseX = e.clientX - rect.left;
                     const mouseY = e.clientY - rect.top;
-
                     const worldX = (mouseX - prev.x) / prev.scale;
                     const worldY = (mouseY - prev.y) / prev.scale;
-
                     return {
                         x: mouseX - worldX * newScale,
                         y: mouseY - worldY * newScale,
@@ -141,15 +180,12 @@ export function Board({ roomId }: BoardProps) {
                 });
             }
         };
-
         container.addEventListener('wheel', onWheel, { passive: false });
         return () => container.removeEventListener('wheel', onWheel);
     }, []);
 
-    // Removed React onWheel to avoid conflicts
 
     const handlePointerDown = (e: React.PointerEvent) => {
-        // Pan on Middle Click OR Left Click + Space (simulated by activeTool check if we had it) OR Hand Tool
         if (activeTool === 'hand' || e.button === 1) {
             e.preventDefault();
             setIsPanning(true);
@@ -178,17 +214,13 @@ export function Board({ roomId }: BoardProps) {
         }
     };
 
-    // Cursor Broadcast (Throttled)
     const lastCursorUpdate = useRef(0);
     const handleMouseMove = (e: React.MouseEvent) => {
         if (!containerRef.current) return;
         const rect = containerRef.current.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
-
-        // Broadcast World Coordinates
         const worldPos = toWorld(mouseX, mouseY);
-
         const now = Date.now();
         if (now - lastCursorUpdate.current > 30) {
             broadcast({
@@ -205,27 +237,13 @@ export function Board({ roomId }: BoardProps) {
         }
     };
 
-    const handleDragUpdate = (id: string, newWorldX: number, newWorldY: number, final: boolean) => {
-        // Received World Coordinates
-        if (final) {
-            store.updateElement(id, { x: newWorldX, y: newWorldY });
-            broadcast({ type: 'UPDATE_ELEMENT', payload: { id, updates: { x: newWorldX, y: newWorldY } } });
-        } else {
-            broadcast({ type: 'UPDATE_ELEMENT', payload: { id, updates: { x: newWorldX, y: newWorldY } } });
-        }
-    }
-
     const handleCanvasClick = (e: React.MouseEvent) => {
         if (activeTool === 'select' || activeTool === 'hand' || isPanning) return;
         if (!containerRef.current) return;
-
         const rect = containerRef.current.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
-
         const worldPos = toWorld(mouseX, mouseY);
-
-        // Open Modal
         setPendingTool(activeTool);
         setPendingClick(worldPos);
         setInputValue('');
@@ -234,7 +252,6 @@ export function Board({ roomId }: BoardProps) {
 
     const handleModalSubmit = () => {
         if (!pendingTool || !pendingClick) return;
-
         const content = inputValue || (pendingTool === 'sticky' ? 'New Note' : 'Content');
         const id = nanoid();
         const newElement: BoardElement = {
@@ -245,7 +262,6 @@ export function Board({ roomId }: BoardProps) {
             content,
             createdBy: store.userId,
         };
-
         store.addElement(newElement);
         broadcast({ type: 'ADD_ELEMENT', payload: newElement });
         setModalOpen(false);
@@ -314,7 +330,6 @@ export function Board({ roomId }: BoardProps) {
                 <Button
                     onClick={() => {
                         navigator.clipboard.writeText(window.location.href);
-                        // Simple toast fallback
                         const btn = document.getElementById('invite-text');
                         if (btn) btn.innerText = 'Copied!';
                         setTimeout(() => { if (btn) btn.innerText = 'Invite Friend'; }, 2000);
@@ -323,6 +338,17 @@ export function Board({ roomId }: BoardProps) {
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
                     <span id="invite-text">Invite Friend</span>
+                </Button>
+            </div>
+
+            {/* Gesture Toggle */}
+            <div className="absolute bottom-20 left-6 md:bottom-auto md:left-auto md:top-6 md:right-6 z-50">
+                <Button
+                    size="icon"
+                    onClick={() => setGestureMode(!gestureMode)}
+                    className={cn("glass border-white/10 transition-all shadow-xl rounded-full w-12 h-12", gestureMode ? "bg-primary text-white" : "hover:bg-white/10 text-muted-foreground")}
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0" /><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" /><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></svg>
                 </Button>
             </div>
 
@@ -338,6 +364,302 @@ export function Board({ roomId }: BoardProps) {
                 <button onClick={handleClearBoard} className="p-2 rounded-xl hover:bg-destructive/20 text-destructive/80 hover:text-destructive transition-colors"><Eraser size={18} /></button>
             </div>
 
+
+            <GestureController
+                enabled={gestureMode}
+                onCursorUpdate={(x, y, isPinching, isFist, landmarks) => {
+                    let interactionX = x;
+                    let interactionY = y;
+
+                    // Use Midpoint between Thumb (4) and Index (8) for better accuracy
+                    if (landmarks && landmarks.length > 8) {
+                        const thumb = landmarks[4];
+                        const index = landmarks[8];
+                        // Mirror X coordinate (camera is mirrored)
+                        const thumbScreenX = (1 - thumb.x) * window.innerWidth;
+                        const indexScreenX = (1 - index.x) * window.innerWidth;
+                        const thumbScreenY = thumb.y * window.innerHeight;
+                        const indexScreenY = index.y * window.innerHeight;
+
+                        interactionX = (thumbScreenX + indexScreenX) / 2;
+                        interactionY = (thumbScreenY + indexScreenY) / 2;
+                    }
+
+                    // Use ref for grab status to persist across renders
+                    let currentGrabStatus = grabStatusRef.current;
+
+                    // Track interaction point for drag (even if temporarily not pinching due to flicker)
+                    const v = viewportRef.current;
+                    const wX = (interactionX - v.x) / v.scale;
+                    const wY = (interactionY - v.y) / v.scale;
+
+                    // --- PINCH GRAB LOGIC with DEBOUNCE ---
+                    // If we're currently holding something, be very sticky about it
+                    const isHolding = grabbedElRef.current !== null && grabStatusRef.current === 'grabbed';
+
+                    if (isPinching) {
+                        // Reset release counter when pinching
+                        pinchReleaseCounterRef.current = 0;
+
+                        if (!isHolding && !wasPinchingRef.current) {
+                            // PINCH START - Find element under cursor
+                            const candidates = document.querySelectorAll('[data-element-id]');
+                            let bestElement: HTMLElement | null = null;
+                            let bestElementId: string | null = null;
+                            let minDist = Infinity;
+                            const SEARCH_RADIUS = 100; // px - larger for easier grabbing
+
+                            candidates.forEach((el) => {
+                                const rect = el.getBoundingClientRect();
+                                const centerX = rect.left + rect.width / 2;
+                                const centerY = rect.top + rect.height / 2;
+
+                                // Check if point inside rect
+                                const inside = interactionX >= rect.left && interactionX <= rect.right &&
+                                    interactionY >= rect.top && interactionY <= rect.bottom;
+
+                                const dist = Math.hypot(interactionX - centerX, interactionY - centerY);
+
+                                if (inside) {
+                                    const score = -1000 + dist;
+                                    if (score < minDist) {
+                                        minDist = score;
+                                        bestElement = el as HTMLElement;
+                                        bestElementId = bestElement.dataset.elementId || null;
+                                    }
+                                } else if (dist < SEARCH_RADIUS && dist < minDist) {
+                                    minDist = dist;
+                                    bestElement = el as HTMLElement;
+                                    bestElementId = bestElement.dataset.elementId || null;
+                                }
+                            });
+
+                            if (bestElementId && bestElement) {
+                                // GRAB SUCCESS
+                                currentGrabStatus = 'grabbed';
+                                grabStatusRef.current = 'grabbed';
+
+                                // Get current position from DOM transform (more accurate than store which may be stale)
+                                // Parse the transform: translate(Xpx, Ypx)
+                                const el = bestElement as HTMLElement;
+                                const transformStyle = el.style.transform;
+                                let currentX = 0;
+                                let currentY = 0;
+
+                                if (transformStyle) {
+                                    const match = transformStyle.match(/translate\(([^,]+)px,\s*([^)]+)px\)/);
+                                    if (match) {
+                                        currentX = parseFloat(match[1]);
+                                        currentY = parseFloat(match[2]);
+                                    }
+                                }
+
+                                // Fallback to store if transform parsing failed
+                                if (currentX === 0 && currentY === 0) {
+                                    const elementData = store.elements[bestElementId];
+                                    if (elementData) {
+                                        currentX = elementData.x;
+                                        currentY = elementData.y;
+                                    }
+                                }
+
+                                grabbedElRef.current = {
+                                    id: bestElementId,
+                                    offsetX: wX - currentX,
+                                    offsetY: wY - currentY,
+                                    element: bestElement
+                                };
+                            } else {
+                                // GRAB MISS
+                                currentGrabStatus = 'miss';
+                                grabStatusRef.current = 'miss';
+                                grabbedElRef.current = null;
+                            }
+                        }
+                    } else {
+                        // NOT PINCHING - but maybe just a flicker?
+                        if (isHolding) {
+                            // Increment release counter
+                            pinchReleaseCounterRef.current++;
+
+                            // Only release after N consecutive non-pinch frames (debounce)
+                            const RELEASE_THRESHOLD = 5;
+                            if (pinchReleaseCounterRef.current >= RELEASE_THRESHOLD) {
+                                // Actually release now
+                                if (grabbedElRef.current) {
+                                    const newX = wX - grabbedElRef.current.offsetX;
+                                    const newY = wY - grabbedElRef.current.offsetY;
+                                    handleDragUpdate(grabbedElRef.current.id, newX, newY, true);
+                                }
+                                grabbedElRef.current = null;
+                                currentGrabStatus = null;
+                                grabStatusRef.current = null;
+                                pinchReleaseCounterRef.current = 0;
+                            }
+                            // If under threshold, stay in grabbed state (ignore flicker)
+                        } else {
+                            // Not holding anything, safe to reset
+                            if (grabStatusRef.current !== null) {
+                                currentGrabStatus = null;
+                                grabStatusRef.current = null;
+                            }
+                            pinchReleaseCounterRef.current = 0;
+                        }
+                    }
+
+                    // DRAG - Always update position while holding (even during flicker)
+                    if (grabbedElRef.current && grabStatusRef.current === 'grabbed') {
+                        const newX = wX - grabbedElRef.current.offsetX;
+                        const newY = wY - grabbedElRef.current.offsetY;
+
+                        // Direct DOM update for smooth visual
+                        if (grabbedElRef.current.element) {
+                            grabbedElRef.current.element.style.transform = `translate(${newX}px, ${newY}px)`;
+                        }
+
+                        // Throttled store update for sync
+                        handleDragUpdate(grabbedElRef.current.id, newX, newY, false);
+                    }
+
+                    wasPinchingRef.current = isPinching;
+
+                    // FIST PAN - Completely blocked during grab/pinch activity
+                    // Must NOT be pinching, NOT holding anything, and NOT in any grab state
+                    const canFistPan = isFist &&
+                        !isPinching &&
+                        !grabbedElRef.current &&
+                        grabStatusRef.current === null &&
+                        pinchReleaseCounterRef.current === 0;
+
+                    if (canFistPan) {
+                        // Debounce fist activation to prevent accidental triggers
+                        fistActiveCounterRef.current++;
+
+                        // Only start panning after 3 consecutive fist frames
+                        if (fistActiveCounterRef.current >= 3) {
+                            if (lastGestureRef.current) {
+                                const dx = interactionX - lastGestureRef.current.x;
+                                const dy = interactionY - lastGestureRef.current.y;
+
+                                // Smooth pan using lerp
+                                panVelocityRef.current = {
+                                    x: panVelocityRef.current.x * 0.6 + dx * 0.4,
+                                    y: panVelocityRef.current.y * 0.6 + dy * 0.4
+                                };
+
+                                setViewport(prev => ({
+                                    ...prev,
+                                    x: prev.x + panVelocityRef.current.x,
+                                    y: prev.y + panVelocityRef.current.y
+                                }));
+                            }
+                            lastGestureRef.current = { x: interactionX, y: interactionY };
+                        }
+                    } else {
+                        // Reset fist tracking
+                        fistActiveCounterRef.current = 0;
+                        lastGestureRef.current = null;
+                        panVelocityRef.current = { x: 0, y: 0 };
+                    }
+
+                    // Update State for visuals
+                    setVirtualCursor({
+                        x: interactionX,
+                        y: interactionY,
+                        isPinching,
+                        isFist,
+                        landmarks,
+                        grabStatus: currentGrabStatus
+                    });
+                }}
+            />
+
+            {/* Virtual Gesture Overlay */}
+            {gestureMode && virtualCursor && (
+                <div className="fixed inset-0 z-[1000] pointer-events-none overflow-hidden">
+
+                    {/* Interaction Midpoint Indicator */}
+                    <div
+                        className={cn(
+                            "absolute w-3 h-3 rounded-full z-50",
+                            virtualCursor.grabStatus === 'grabbed' ? "bg-green-400/70" :
+                                virtualCursor.grabStatus === 'miss' ? "bg-red-400/70" :
+                                    "bg-yellow-400/50"
+                        )}
+                        style={{
+                            left: virtualCursor.x,
+                            top: virtualCursor.y,
+                            transform: 'translate(-50%, -50%)'
+                        }}
+                    />
+
+                    {/* Hand Landmarks - NO TRANSITIONS for instant tracking */}
+                    {virtualCursor.landmarks && virtualCursor.landmarks.map((point: any, i: number) => {
+                        const isTip = [4, 8, 12, 16, 20].includes(i);
+                        const isActionFinger = (i === 4 || i === 8);
+
+                        const screenX = (1 - point.x) * window.innerWidth;
+                        const screenY = point.y * window.innerHeight;
+
+                        if (isTip) {
+                            let size = 16; // w-4 = 16px
+                            let bgColor = 'rgba(255,255,255,1)';
+                            let shadow = '0 0 15px rgba(255,255,255,0.8)';
+
+                            if (isActionFinger && virtualCursor.isPinching) {
+                                size = 24; // w-6 = 24px
+                                if (virtualCursor.grabStatus === 'grabbed') {
+                                    bgColor = '#22c55e';
+                                    shadow = '0 0 20px #22c55e';
+                                } else if (virtualCursor.grabStatus === 'miss') {
+                                    bgColor = '#ef4444';
+                                    shadow = '0 0 20px #ef4444';
+                                } else {
+                                    bgColor = '#fb923c';
+                                    shadow = '0 0 15px #fb923c';
+                                }
+                            }
+
+                            return (
+                                <div
+                                    key={i}
+                                    style={{
+                                        position: 'absolute',
+                                        left: screenX,
+                                        top: screenY,
+                                        width: size,
+                                        height: size,
+                                        borderRadius: '50%',
+                                        backgroundColor: bgColor,
+                                        boxShadow: shadow,
+                                        transform: 'translate(-50%, -50%)',
+                                        pointerEvents: 'none'
+                                    }}
+                                />
+                            )
+                        }
+
+                        // Non-tip landmarks - smaller dots
+                        return (
+                            <div
+                                key={i}
+                                style={{
+                                    position: 'absolute',
+                                    left: screenX,
+                                    top: screenY,
+                                    width: 6,
+                                    height: 6,
+                                    borderRadius: '50%',
+                                    backgroundColor: 'rgba(255,255,255,0.4)',
+                                    transform: 'translate(-50%, -50%)',
+                                    pointerEvents: 'none'
+                                }}
+                            />
+                        )
+                    })}
+                </div>
+            )}
+
             <div
                 ref={containerRef}
                 className={cn(
@@ -348,19 +670,12 @@ export function Board({ roomId }: BoardProps) {
                 onPointerDown={handlePointerDown}
                 onClick={handleCanvasClick}
             >
-                {/* World Container - Scaled & Panned */}
                 <div
                     className="absolute top-0 left-0 w-full h-full origin-top-left will-change-transform"
                     style={{
                         transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`
                     }}
                 >
-                    {/* Grid (Scaled with world) */}
-                    {/* Infinite grid typically needs to be offset by modulus. 
-                 But applying to container scales it correctly. 
-                 We just need it to be large enough? 
-                 Actually, background-image on a div that follows viewport?
-             */}
                     <div className="absolute -top-[50000px] -left-[50000px] w-[100000px] h-[100000px] opacity-[0.05] pointer-events-none"
                         style={{
                             backgroundImage: `linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)`,
@@ -381,7 +696,7 @@ export function Board({ roomId }: BoardProps) {
                         ))}
                     </AnimatePresence>
 
-                    {/* Cursors in World Space */}
+                    {/* Cursors */}
                     {Object.entries(store.cursors).map(([id, cursor]) => {
                         if (id === store.userId) return null;
                         return (
@@ -391,10 +706,6 @@ export function Board({ roomId }: BoardProps) {
                                 initial={{ left: cursor.x, top: cursor.y }}
                                 animate={{ left: cursor.x, top: cursor.y }}
                                 transition={{ type: "tween", ease: "linear", duration: 0.1 }}
-                                // Scale the cursor itself inversely? Usually we want cursors to stay constant size or scale?
-                                // "elements should be there... x,y shoudnt be messed"
-                                // If we scale the container, the cursor div scales too.
-                                // To keep cursor constant size visually while taking position in scaled world:
                                 style={{ transform: `scale(${1 / viewport.scale})` }}
                             >
                                 <UserCursorIcon color={cursor.color} label={cursor.username} />
@@ -459,7 +770,6 @@ function DraggableElement({
     const elementRef = useRef<HTMLDivElement>(null);
     const isDragging = useRef(false);
 
-    // Throttled broadcast
     const broadcastMove = useRef(requestThrottle((x: number, y: number) => {
         onDragUpdate(x, y, false);
     }, 50)).current;
@@ -484,8 +794,6 @@ function DraggableElement({
 
         const onPointerMove = (ev: PointerEvent) => {
             if (!isDragging.current) return;
-
-            // Critical: Delta must be divided by scale to map back to World Units
             const deltaX = (ev.clientX - startX) / scale;
             const deltaY = (ev.clientY - startY) / scale;
 
@@ -495,7 +803,6 @@ function DraggableElement({
             if (elementRef.current) {
                 elementRef.current.style.transform = `translate(${newX}px, ${newY}px)`;
             }
-
             broadcastMove(newX, newY);
         };
 
@@ -522,6 +829,8 @@ function DraggableElement({
     return (
         <div
             ref={elementRef}
+            // Add data-element-id here for Gesture Hit Testing
+            data-element-id={data.id}
             className={cn(
                 "absolute top-0 left-0 transition-shadow group select-none touch-none will-change-transform",
                 activeTool === 'select' ? "cursor-grab active:cursor-grabbing hover:ring-2 ring-primary/50" : "pointer-events-none",
@@ -532,7 +841,6 @@ function DraggableElement({
             }}
             onPointerDown={handlePointerDown}
         >
-
             <div className={cn(
                 "relative rounded-xl border-2 border-transparent transition-transform",
                 data.type === 'code' && "bg-[#0d1117] font-mono text-sm border-white/10 shadow-xl overflow-hidden min-w-[300px]",
