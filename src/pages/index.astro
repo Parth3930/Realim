@@ -1,6 +1,6 @@
 ---
+export const prerender = true;
 import Layout from "../layouts/Layout.astro";
-import { Edit2 } from "lucide-react";
 ---
 
 <Layout title="Realim | P2P Space">
@@ -69,7 +69,21 @@ import { Edit2 } from "lucide-react";
 							value="Loading..."
 							class="bg-transparent border-none outline-none text-sm font-medium w-full text-left group-hover:text-primary transition-colors cursor-text selection:bg-primary/30"
 						/>
-						<Edit2 size={14} className="opacity-50 mr-2" />
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="14"
+							height="14"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							class="opacity-50 mr-2"
+							><path
+								d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"
+							></path><path d="m15 5 4 4"></path></svg
+						>
 					</div>
 				</div>
 
