@@ -5,8 +5,11 @@ import react from '@astrojs/react';
 
 import tailwindcss from '@tailwindcss/vite';
 
+import vercel from '@astrojs/vercel';
+
 // https://astro.build/config
 export default defineConfig({
+  output: 'server',
   integrations: [react()],
 
   vite: {
@@ -14,5 +17,7 @@ export default defineConfig({
     server: {
       allowedHosts: ['adaptor-leaves-vip-categories.trycloudflare.com']
     }
-  }
+  },
+
+  adapter: vercel()
 });
