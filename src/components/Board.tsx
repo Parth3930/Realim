@@ -84,10 +84,8 @@ export function Board({ roomId }: BoardProps) {
                 console.log('[Board] Found host marker, claiming host');
                 store.setIsHost(true);
             } else {
-                // New board, first visitor - claim host status
-                console.log('[Board] New board, claiming host as first visitor');
-                store.setIsHost(true);
-                localStorage.setItem(`realim_is_host_${roomId}`, 'true');
+                // Don't claim host yet - let P2P determine based on sync responses
+                console.log('[Board] New visitor, waiting for P2P to determine host status');
             }
         });
         store.saveRoom(roomId);

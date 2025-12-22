@@ -97,9 +97,28 @@ export function useP2P(roomId: string | null) {
             store.removeCursor(peerId);
         });
 
+        // Track if we receive a sync response to determine host status
+        let syncReceived = false;
+        const claimHostTimer = setTimeout(() => {
+            if (!syncReceived && !isCreator) {
+                const currentState = useBoardStore.getState();
+                if (!currentState.isHost) {
+                    console.log('[P2P] No sync response received, claiming host status');
+                    store.setIsHost(true);
+                    localStorage.setItem(`realim_is_host_${roomId}`, 'true');
+                }
+            }
+        }, 2000);
+
         getAction((data: Action, peerId) => {
             const state = useBoardStore.getState();
             console.log(`[P2P] Received action from ${peerId}:`, data.type);
+
+            // Mark that we received a sync response - cancel host claim
+            if (data.type === 'SYNC_RESP') {
+                syncReceived = true;
+                clearTimeout(claimHostTimer);
+            }
 
             switch (data.type) {
                 case 'SYNC_REQ':
