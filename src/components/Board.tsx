@@ -65,15 +65,29 @@ export function Board({ roomId }: BoardProps) {
     // Persistence: Load
     useEffect(() => {
         store.setRoomId(roomId);
+
+        const hostMarker = localStorage.getItem(`realim_is_host_${roomId}`);
+        const hostPassword = localStorage.getItem(`room_pass_${roomId}`);
+
         get(`realim_room_${roomId}`).then((val) => {
             if (val && Object.keys(val).length > 0) {
                 // We have saved content - we're the host of this board
+                console.log('[Board] Found saved content, claiming host');
                 store.setIsHost(true);
                 localStorage.setItem(`realim_is_host_${roomId}`, 'true');
                 if (Object.keys(store.elements).length === 0) {
                     // Load saved state to store
                     Object.values(val).forEach((el: any) => store.addElement(el));
                 }
+            } else if (hostMarker === 'true' || hostPassword) {
+                // We have a host marker or password - we're the host
+                console.log('[Board] Found host marker, claiming host');
+                store.setIsHost(true);
+            } else {
+                // New board, first visitor - claim host status
+                console.log('[Board] New board, claiming host as first visitor');
+                store.setIsHost(true);
+                localStorage.setItem(`realim_is_host_${roomId}`, 'true');
             }
         });
         store.saveRoom(roomId);
@@ -308,6 +322,7 @@ export function Board({ roomId }: BoardProps) {
         };
         store.addElement(newElement);
         broadcast({ type: 'ADD_ELEMENT', payload: newElement });
+        console.log('[Board] Broadcasted new element:', newElement.type, newElement.id);
         setModalOpen(false);
         setPendingTool(null);
         setPendingClick(null);
