@@ -110,46 +110,58 @@ export function Board({ roomId }: BoardProps) {
         const hostMarker = localStorage.getItem(`realim_is_host_${roomId}`);
         const hostPassword = localStorage.getItem(`room_pass_${roomId}`);
 
+        // Determine host status FIRST based on localStorage markers
+        // This is the authoritative source - not having saved content
+        const isCreator = hostMarker === 'true' || !!hostPassword;
+
+        if (isCreator) {
+            console.log('[Board] We created this room, setting host');
+            store.setIsHost(true);
+        } else {
+            console.log('[Board] Not the room creator, not host');
+            store.setIsHost(false);
+        }
+
+        // Load saved elements from IndexedDB (separate from host logic)
         get(`realim_room_${roomId}`).then((val) => {
             if (val && Object.keys(val).length > 0) {
-                // We have saved content - we're the host of this board
-                console.log('[Board] Found saved content, claiming host');
-                store.setIsHost(true);
-                localStorage.setItem(`realim_is_host_${roomId}`, 'true');
+                // Only load if our store is empty
                 if (Object.keys(store.elements).length === 0) {
-                    // Load saved state to store
+                    console.log('[Board] Loading saved elements from IndexedDB');
                     Object.values(val).forEach((el: any) => store.addElement(el));
                 }
-            } else if (hostMarker === 'true' || hostPassword) {
-                // We have a host marker or password - we're the host
-                console.log('[Board] Found host marker, claiming host');
-                store.setIsHost(true);
-            } else {
-                // Don't claim host yet - let P2P determine based on sync responses
-                console.log('[Board] New visitor, waiting for P2P to determine host status');
             }
         });
+
         store.saveRoom(roomId);
     }, [roomId]);
 
-    // Persistence: Save
+    // Persistence: Save (fast debounce)
     useEffect(() => {
         const timer = setTimeout(() => {
             if (Object.keys(store.elements).length > 0) {
                 set(`realim_room_${roomId}`, store.elements);
             }
-        }, 1000);
+        }, 300); // Fast save for instant feel
         return () => clearTimeout(timer);
     }, [store.elements, roomId]);
 
     // Auto-center on latest element when joining/loading
     const hasAutoCenteredRef = useRef(false);
-    useEffect(() => {
-        // Only auto-center once when elements first load
-        if (hasAutoCenteredRef.current) return;
+    const lastElementCountRef = useRef(0);
 
+    useEffect(() => {
         const elements = Object.values(store.elements);
-        if (elements.length === 0) return;
+        const currentCount = elements.length;
+
+        // Auto-center on first load OR when significant new elements arrive from sync
+        const isFirstLoad = !hasAutoCenteredRef.current && currentCount > 0;
+        const isNewSyncData = currentCount > 0 && lastElementCountRef.current === 0 && currentCount > 0;
+
+        if (!isFirstLoad && !isNewSyncData) {
+            lastElementCountRef.current = currentCount;
+            return;
+        }
 
         // Wait a bit for all elements to load
         const timer = setTimeout(() => {
@@ -179,8 +191,11 @@ export function Board({ roomId }: BoardProps) {
                     scale: 1
                 });
                 hasAutoCenteredRef.current = true;
+                console.log('[Board] Auto-centered on element:', latest.id);
             }
-        }, 500); // Increased delay to ensure elements are loaded
+
+            lastElementCountRef.current = allElements.length;
+        }, 100); // Fast auto-center for instant sync feel
 
         return () => clearTimeout(timer);
     }, [store.elements]); // Trigger when elements change
@@ -281,8 +296,98 @@ export function Board({ roomId }: BoardProps) {
             }
         };
         container.addEventListener('wheel', onWheel, { passive: false });
-        return () => container.removeEventListener('wheel', onWheel);
-    }, []);
+
+        // Touch gesture handling for mobile pinch-to-zoom and pan
+        let initialTouchDist = 0;
+        let initialTouchMidpoint = { x: 0, y: 0 };
+        let initialViewportOnTouch = { x: 0, y: 0, scale: 1 };
+        let isTouchZooming = false;
+        let isTouchPanning = false;
+        let lastTouchPos = { x: 0, y: 0 };
+
+        const onTouchStart = (e: TouchEvent) => {
+            if (e.touches.length === 2) {
+                // Two finger gesture - pinch zoom or pan
+                e.preventDefault();
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+                initialTouchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                initialTouchMidpoint = {
+                    x: (t1.clientX + t2.clientX) / 2,
+                    y: (t1.clientY + t2.clientY) / 2
+                };
+                initialViewportOnTouch = { ...viewportRef.current };
+                isTouchZooming = true;
+                isTouchPanning = true;
+            } else if (e.touches.length === 1 && activeTool === 'hand') {
+                // Single finger pan when hand tool is active
+                e.preventDefault();
+                lastTouchPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                initialViewportOnTouch = { ...viewportRef.current };
+                isTouchPanning = true;
+            }
+        };
+
+        const onTouchMove = (e: TouchEvent) => {
+            if (e.touches.length === 2 && isTouchZooming) {
+                e.preventDefault();
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+                const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                const currentMidpoint = {
+                    x: (t1.clientX + t2.clientX) / 2,
+                    y: (t1.clientY + t2.clientY) / 2
+                };
+
+                // Calculate scale change
+                const scaleFactor = currentDist / Math.max(initialTouchDist, 1);
+                const newScale = Math.min(Math.max(initialViewportOnTouch.scale * scaleFactor, 0.3), 5);
+
+                // Calculate pan offset
+                const panX = currentMidpoint.x - initialTouchMidpoint.x;
+                const panY = currentMidpoint.y - initialTouchMidpoint.y;
+
+                // Apply zoom centered on midpoint
+                const rect = container.getBoundingClientRect();
+                const midX = initialTouchMidpoint.x - rect.left;
+                const midY = initialTouchMidpoint.y - rect.top;
+                const worldX = (midX - initialViewportOnTouch.x) / initialViewportOnTouch.scale;
+                const worldY = (midY - initialViewportOnTouch.y) / initialViewportOnTouch.scale;
+
+                setViewport({
+                    x: midX - worldX * newScale + panX,
+                    y: midY - worldY * newScale + panY,
+                    scale: newScale
+                });
+            } else if (e.touches.length === 1 && isTouchPanning && activeTool === 'hand') {
+                e.preventDefault();
+                const dx = e.touches[0].clientX - lastTouchPos.x;
+                const dy = e.touches[0].clientY - lastTouchPos.y;
+                setViewport(prev => ({
+                    ...prev,
+                    x: prev.x + dx,
+                    y: prev.y + dy
+                }));
+                lastTouchPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+        };
+
+        const onTouchEnd = () => {
+            isTouchZooming = false;
+            isTouchPanning = false;
+        };
+
+        container.addEventListener('touchstart', onTouchStart, { passive: false });
+        container.addEventListener('touchmove', onTouchMove, { passive: false });
+        container.addEventListener('touchend', onTouchEnd);
+
+        return () => {
+            container.removeEventListener('wheel', onWheel);
+            container.removeEventListener('touchstart', onTouchStart);
+            container.removeEventListener('touchmove', onTouchMove);
+            container.removeEventListener('touchend', onTouchEnd);
+        };
+    }, [activeTool]);
 
 
     const handlePointerDown = (e: React.PointerEvent) => {
@@ -322,7 +427,7 @@ export function Board({ roomId }: BoardProps) {
         const mouseY = e.clientY - rect.top;
         const worldPos = toWorld(mouseX, mouseY);
         const now = Date.now();
-        if (now - lastCursorUpdate.current > 30) {
+        if (now - lastCursorUpdate.current > 16) { // ~60fps cursor sync
             broadcast({
                 type: 'CURSOR_MOVE',
                 payload: {
@@ -950,13 +1055,18 @@ function UserCursorIcon({ color, label }: { color: string, label: string }) {
     )
 }
 
-const requestThrottle = (callback: Function, delay: number) => {
-    let lastTime = 0;
+// RAF-based throttle for smoother, faster sync
+const requestThrottle = (callback: Function, _delay: number) => {
+    let pending = false;
+    let latestArgs: any[] = [];
     return (...args: any[]) => {
-        const now = Date.now();
-        if (now - lastTime >= delay) {
-            callback(...args);
-            lastTime = now;
+        latestArgs = args;
+        if (!pending) {
+            pending = true;
+            requestAnimationFrame(() => {
+                callback(...latestArgs);
+                pending = false;
+            });
         }
     };
 };
@@ -989,9 +1099,10 @@ function DraggableElement({
     const elementRef = useRef<HTMLDivElement>(null);
     const isDragging = useRef(false);
 
+    // Use RAF-based throttle for instant sync during drag
     const broadcastMove = useRef(requestThrottle((x: number, y: number) => {
         onDragUpdate(x, y, false);
-    }, 50)).current;
+    }, 16)).current; // 16ms = ~60fps
 
     const handlePointerDown = (e: React.PointerEvent) => {
         if (activeTool !== 'select') return;
