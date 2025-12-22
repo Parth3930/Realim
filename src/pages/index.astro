@@ -24,11 +24,11 @@ import Layout from "../layouts/Layout.astro";
 		</div>
 
 		<div
-			class="relative z-10 w-full max-w-6xl mx-auto p-6 md:p-12 grid grid-cols-1 md:grid-cols-2 gap-12 items-start"
+			class="relative z-10 w-full max-w-6xl mx-auto p-4 sm:p-6 md:p-12 grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-12 items-start"
 		>
 			{/* Left Col: Main Controls */}
 			<div
-				class="space-y-8 p-10 glass rounded-3xl border border-white/10 shadow-2xl relative order-2 md:order-1"
+				class="space-y-6 sm:space-y-8 p-6 sm:p-8 md:p-10 glass rounded-2xl sm:rounded-3xl border border-white/10 shadow-2xl relative order-2 md:order-1"
 			>
 				{/* Header */}
 				<div class="space-y-4 text-center">
@@ -39,11 +39,13 @@ import Layout from "../layouts/Layout.astro";
 					</div>
 					<div>
 						<h1
-							class="text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-b from-white to-white/50 tracking-tight leading-tight"
+							class="text-3xl sm:text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-b from-white to-white/50 tracking-tight leading-tight"
 						>
 							Realim
 						</h1>
-						<p class="text-muted-foreground text-lg mt-2">
+						<p
+							class="text-muted-foreground text-sm sm:text-base md:text-lg mt-2"
+						>
 							Ephemeral, serverless, P2P collaboration.
 						</p>
 					</div>
@@ -100,14 +102,14 @@ import Layout from "../layouts/Layout.astro";
 						</div>
 						<button
 							id="create-btn"
-							class="group relative w-full inline-flex h-14 items-center justify-center overflow-hidden rounded-xl bg-white/5 px-8 font-medium text-white transition-all duration-300 hover:bg-white/10 hover:scale-[1.01] shadow-2xl border border-white/10 ring-1 ring-white/5"
+							class="group relative w-full inline-flex h-12 sm:h-14 items-center justify-center overflow-hidden rounded-xl bg-white/5 px-6 sm:px-8 font-medium text-white transition-all duration-300 hover:bg-white/10 active:scale-[0.98] hover:scale-[1.01] shadow-2xl border border-white/10 ring-1 ring-white/5 touch-manipulation"
 						>
 							<div
 								class="absolute inset-0 bg-gradient-to-r from-primary/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
 							>
 							</div>
 							<span
-								class="relative flex items-center gap-3 text-lg"
+								class="relative flex items-center gap-2 sm:gap-3 text-base sm:text-lg"
 							>
 								Create New Space
 								<svg
@@ -143,22 +145,24 @@ import Layout from "../layouts/Layout.astro";
 						</div>
 					</div>
 
-					<div class="flex gap-3">
-						<input
-							id="join-input"
-							type="text"
-							placeholder="Room ID"
-							class="flex h-14 w-full rounded-xl border border-white/10 bg-black/20 px-5 py-2 text-sm ring-offset-background placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-all hover:bg-black/30"
-						/>
-						<input
-							id="join-password"
-							type="password"
-							placeholder="Pass?"
-							class="flex h-14 w-28 rounded-xl border border-white/10 bg-black/20 px-4 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-all hover:bg-black/30 placeholder:text-muted-foreground/50"
-						/>
+					<div class="flex flex-col sm:flex-row gap-3">
+						<div class="flex gap-3 w-full sm:flex-1">
+							<input
+								id="join-input"
+								type="text"
+								placeholder="Room ID"
+								class="flex h-12 sm:h-14 flex-1 rounded-xl border border-white/10 bg-black/20 px-4 sm:px-5 py-2 text-sm ring-offset-background placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-all hover:bg-black/30"
+							/>
+							<input
+								id="join-password"
+								type="password"
+								placeholder="Pass?"
+								class="flex h-12 sm:h-14 w-24 sm:w-28 rounded-xl border border-white/10 bg-black/20 px-3 sm:px-4 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-all hover:bg-black/30 placeholder:text-muted-foreground/50"
+							/>
+						</div>
 						<button
 							id="join-btn"
-							class="h-14 w-14 shrink-0 inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/5 hover:bg-primary hover:border-primary hover:text-white transition-all shadow-lg"
+							class="h-12 sm:h-14 w-full sm:w-14 shrink-0 inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/5 hover:bg-primary active:bg-primary hover:border-primary hover:text-white transition-all shadow-lg touch-manipulation"
 						>
 							<svg
 								xmlns="http://www.w3.org/2000/svg"
@@ -243,12 +247,14 @@ import Layout from "../layouts/Layout.astro";
 		</div>
 
 		{/* Support Section */}
-		<div class="absolute bottom-6 left-0 right-0 z-10 flex justify-center">
+		<div
+			class="absolute bottom-4 sm:bottom-6 left-0 right-0 z-10 flex justify-center px-4"
+		>
 			<a
 				href="https://buymeacoffee.com/Rover01"
 				target="_blank"
 				rel="noopener noreferrer"
-				class="group flex items-center gap-3 px-6 py-3 glass rounded-2xl border border-white/10 hover:border-primary/50 shadow-xl transition-all hover:scale-105"
+				class="group flex items-center gap-2 sm:gap-3 px-4 sm:px-6 py-2 sm:py-3 glass rounded-xl sm:rounded-2xl border border-white/10 hover:border-primary/50 shadow-xl transition-all hover:scale-105 text-sm sm:text-base"
 			>
 				<div class="flex items-center gap-2">
 					<span class="text-2xl group-hover:animate-bounce">☕</span>

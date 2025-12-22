@@ -378,14 +378,14 @@ export function Board({ roomId }: BoardProps) {
             </Dialog>
 
             {/* Zoom Controls */}
-            <div className="absolute bottom-6 right-6 z-50 flex flex-col gap-2 glass p-2 rounded-xl border border-white/10">
-                <button onClick={() => setViewport(v => ({ ...v, scale: Math.min(v.scale + 0.1, 5) }))} className="p-2 hover:bg-white/10 rounded-lg"><Plus size={20} /></button>
+            <div className="absolute bottom-4 sm:bottom-6 right-4 sm:right-6 z-50 flex flex-col gap-2 glass p-2 rounded-xl border border-white/10">
+                <button onClick={() => setViewport(v => ({ ...v, scale: Math.min(v.scale + 0.1, 5) }))} className="p-3 sm:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg touch-manipulation"><Plus size={20} /></button>
                 <div className="text-center text-xs font-mono opacity-50">{Math.round(viewport.scale * 100)}%</div>
-                <button onClick={() => setViewport(v => ({ ...v, scale: Math.max(v.scale - 0.1, 0.1) }))} className="p-2 hover:bg-white/10 rounded-lg"><Minus size={20} /></button>
+                <button onClick={() => setViewport(v => ({ ...v, scale: Math.max(v.scale - 0.1, 0.1) }))} className="p-3 sm:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg touch-manipulation"><Minus size={20} /></button>
             </div>
 
             {/* Invite Button */}
-            <div className="absolute bottom-6 left-6 z-50">
+            <div className="absolute bottom-4 sm:bottom-6 left-4 sm:left-6 z-50">
                 <Button
                     onClick={() => {
                         const inviteUrl = `${window.location.origin}/board/${roomId}`;
@@ -394,31 +394,31 @@ export function Board({ roomId }: BoardProps) {
                         if (btn) btn.innerText = 'Copied!';
                         setTimeout(() => { if (btn) btn.innerText = 'Invite Friend'; }, 2000);
                     }}
-                    className="glass border-white/10 shadow-2xl hover:bg-white/10 text-white gap-2"
+                    className="glass border-white/10 shadow-2xl hover:bg-white/10 active:bg-white/20 text-white gap-2 h-10 sm:h-auto px-3 sm:px-4 text-sm sm:text-base touch-manipulation"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>
-                    <span id="invite-text">Invite Friend</span>
+                    <span id="invite-text" className="hidden sm:inline">Invite Friend</span>
                 </Button>
             </div>
 
             {/* Gesture Toggle */}
-            <div className="absolute bottom-20 left-6 md:bottom-auto md:left-auto md:top-6 md:right-6 z-50">
+            <div className="absolute bottom-16 sm:bottom-20 left-4 sm:left-6 md:bottom-auto md:left-auto md:top-6 md:right-6 z-50">
                 <Button
                     size="icon"
                     onClick={() => setGestureMode(!gestureMode)}
-                    className={cn("glass border-white/10 transition-all shadow-xl rounded-full w-12 h-12", gestureMode ? "bg-primary text-white" : "hover:bg-white/10 text-muted-foreground")}
+                    className={cn("glass border-white/10 transition-all shadow-xl rounded-full w-10 h-10 sm:w-12 sm:h-12 touch-manipulation", gestureMode ? "bg-primary text-white" : "hover:bg-white/10 active:bg-white/20 text-muted-foreground")}
                 >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0" /><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" /><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0" /><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" /><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></svg>
                 </Button>
             </div>
 
-            <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 glass px-2 py-2 rounded-2xl flex gap-1 shadow-2xl border border-white/10">
-                <ToolButton active={activeTool === 'select'} onClick={() => setActiveTool('select')} icon={<MousePointer2 size={18} />} label="Select" />
-                <ToolButton active={activeTool === 'hand'} onClick={() => setActiveTool('hand')} icon={<Hand size={18} />} label="Pan" />
-                <div className="w-px bg-white/10 mx-1 h-8 self-center" />
-                <ToolButton active={activeTool === 'text'} onClick={() => setActiveTool('text')} icon={<Type size={18} />} label="Text" />
-                <ToolButton active={activeTool === 'image'} onClick={() => setActiveTool('image')} icon={<ImageIcon size={18} />} label="Image" />
-                <ToolButton active={activeTool === 'sticky'} onClick={() => setActiveTool('sticky')} icon={<StickyNote size={18} />} label="Note" />
+            <div className="absolute top-4 sm:top-6 left-1/2 -translate-x-1/2 z-50 glass px-1 sm:px-2 py-1 sm:py-2 rounded-xl sm:rounded-2xl flex gap-0.5 sm:gap-1 shadow-2xl border border-white/10 max-w-[calc(100vw-2rem)]">
+                <ToolButton active={activeTool === 'select'} onClick={() => setActiveTool('select')} icon={<MousePointer2 size={16} className="sm:w-[18px] sm:h-[18px]" />} label="Select" />
+                <ToolButton active={activeTool === 'hand'} onClick={() => setActiveTool('hand')} icon={<Hand size={16} className="sm:w-[18px] sm:h-[18px]" />} label="Pan" />
+                <div className="w-px bg-white/10 mx-0.5 sm:mx-1 h-6 sm:h-8 self-center" />
+                <ToolButton active={activeTool === 'text'} onClick={() => setActiveTool('text')} icon={<Type size={16} className="sm:w-[18px] sm:h-[18px]" />} label="Text" />
+                <ToolButton active={activeTool === 'image'} onClick={() => setActiveTool('image')} icon={<ImageIcon size={16} className="sm:w-[18px] sm:h-[18px]" />} label="Image" />
+                <ToolButton active={activeTool === 'sticky'} onClick={() => setActiveTool('sticky')} icon={<StickyNote size={16} className="sm:w-[18px] sm:h-[18px]" />} label="Note" />
                 {store.isHost && (
                     <>
                         <div className="w-px bg-destructive/20 mx-1 h-8 self-center" />
@@ -944,9 +944,9 @@ function DraggableElement({
 
 function ToolButton({ active, onClick, icon, label }: any) {
     return (
-        <button onClick={onClick} className={cn("p-2.5 rounded-xl transition-all flex items-center justify-center gap-2 relative group", active ? "bg-primary text-primary-foreground shadow-[0_0_15px_-3px_rgba(139,92,246,0.6)]" : "hover:bg-white/5 text-muted-foreground hover:text-white")}>
+        <button onClick={onClick} className={cn("p-2 sm:p-2.5 rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-2 relative group touch-manipulation active:scale-95", active ? "bg-primary text-primary-foreground shadow-[0_0_15px_-3px_rgba(139,92,246,0.6)]" : "hover:bg-white/5 active:bg-white/10 text-muted-foreground hover:text-white")}>
             {icon}
-            <span className="absolute top-12 bg-black/80 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 border border-white/10 backdrop-blur-md">{label}</span>
+            <span className="absolute top-10 sm:top-12 bg-black/80 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 border border-white/10 backdrop-blur-md">{label}</span>
         </button>
     );
 }
