@@ -31,8 +31,10 @@ export interface BoardElement {
     width?: number;
     height?: number;
     rotation?: number;
+    scale?: number;
     createdBy: string;
     createdAt?: number; // Timestamp for sorting/auto-scroll
+    lastModifiedAt?: number; // Timestamp when element was last moved/modified
 }
 
 export interface UserCursor {

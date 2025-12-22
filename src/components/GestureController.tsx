@@ -1,12 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
+export interface HandData {
+    x: number;
+    y: number;
+    isPinching: boolean;
+    isFist: boolean;
+    landmarks: any[];
+    handedness: string;
+}
+
 interface GestureControllerProps {
-    onCursorUpdate: (x: number, y: number, isPinching: boolean, isFist: boolean, landmarks: any[]) => void;
+    onHandsUpdate: (hands: HandData[]) => void;
     enabled: boolean;
 }
 
-export function GestureController({ onCursorUpdate, enabled }: GestureControllerProps) {
+export function GestureController({ onHandsUpdate, enabled }: GestureControllerProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null); // Kept for resizing logic if needed, but drawing removed
     const [loaded, setLoaded] = useState(false);
@@ -14,6 +23,10 @@ export function GestureController({ onCursorUpdate, enabled }: GestureController
     // Refs for animation loop
     const handLandmarkerRef = useRef<HandLandmarker | null>(null);
     const requestRef = useRef<number>(0);
+
+    // Ref to always have latest callback - fixes stale closure in animation loop
+    const onHandsUpdateRef = useRef(onHandsUpdate);
+    onHandsUpdateRef.current = onHandsUpdate;
 
     // ... (Init and cleanup same as before) ...
     useEffect(() => {
@@ -28,7 +41,7 @@ export function GestureController({ onCursorUpdate, enabled }: GestureController
                     delegate: "GPU"
                 },
                 runningMode: "VIDEO",
-                numHands: 1
+                numHands: 2
             });
             handLandmarkerRef.current = handLandmarker;
             setLoaded(true);
@@ -57,15 +70,9 @@ export function GestureController({ onCursorUpdate, enabled }: GestureController
     }, [enabled, loaded]);
 
     const isFingerDown = (landmarks: any[], tipIdx: number, pipIdx: number) => {
-        // Simple check: Is tip below PIP? (Y increases downwards in screen space?)
-        // MediaPipe coords: Y is 0 at top, 1 at bottom.
-        // If holding hand up: Tip Y should be smaller than PIP Y.
-        // If fist: Tip Y > PIP Y ? (Folded down)
-        // This assumes hand is upright.
-        // Better: Distance to wrist (0)?
         const wrist = landmarks[0];
         const tip = landmarks[tipIdx];
-        const pip = landmarks[pipIdx]; // Proximal Joint
+        const pip = landmarks[pipIdx];
 
         const distTip = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
         const distPip = Math.hypot(pip.x - wrist.x, pip.y - wrist.y);
@@ -83,29 +90,42 @@ export function GestureController({ onCursorUpdate, enabled }: GestureController
         const results = landmarker.detectForVideo(video, startTimeMs);
 
         if (results.landmarks && results.landmarks.length > 0) {
-            const landmarks = results.landmarks[0];
+            const hands: any[] = [];
 
-            // Interaction Logic
-            const indexTip = landmarks[8];
-            const thumbTip = landmarks[4];
+            results.landmarks.forEach((landmarks, index) => {
+                // Interaction Logic
+                const indexTip = landmarks[8];
+                const thumbTip = landmarks[4];
+                const handedness = results.handedness[index][0].categoryName; // Left or Right logic
 
-            // Cursor Position (Mirror X)
-            const cursorX = (1 - indexTip.x) * window.innerWidth;
-            const cursorY = indexTip.y * window.innerHeight;
+                // Cursor Position (Mirror X)
+                const cursorX = (1 - indexTip.x) * window.innerWidth;
+                const cursorY = indexTip.y * window.innerHeight;
 
-            // Pinch Detection
-            const distance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
-            const isPinching = distance < 0.05;
+                // Pinch Detection
+                const distance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+                const isPinching = distance < 0.05;
 
-            // Fist Detection (Check Index, Middle, Ring, Pinky)
-            const indexDown = isFingerDown(landmarks, 8, 6);
-            const middleDown = isFingerDown(landmarks, 12, 10);
-            const ringDown = isFingerDown(landmarks, 16, 14);
-            const pinkyDown = isFingerDown(landmarks, 20, 18);
+                // Fist Detection
+                const indexDown = isFingerDown(landmarks, 8, 6);
+                const middleDown = isFingerDown(landmarks, 12, 10);
+                const ringDown = isFingerDown(landmarks, 16, 14);
+                const pinkyDown = isFingerDown(landmarks, 20, 18);
+                const isFist = indexDown && middleDown && ringDown && pinkyDown;
 
-            const isFist = indexDown && middleDown && ringDown && pinkyDown;
+                hands.push({
+                    x: cursorX,
+                    y: cursorY,
+                    isPinching,
+                    isFist,
+                    landmarks,
+                    handedness
+                });
+            });
 
-            onCursorUpdate(cursorX, cursorY, isPinching, isFist, landmarks);
+            onHandsUpdateRef.current(hands);
+        } else {
+            onHandsUpdateRef.current([]);
         }
 
         requestRef.current = requestAnimationFrame(predict);

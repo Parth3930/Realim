@@ -22,7 +22,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 
-import { GestureController } from './GestureController';
+import { GestureController, type HandData } from './GestureController';
 
 interface BoardProps {
     roomId: string;
@@ -44,14 +44,55 @@ export function Board({ roomId }: BoardProps) {
     // Local state
     const [activeTool, setActiveTool] = useState<ElementType | 'select' | 'hand'>('select');
     const [gestureMode, setGestureMode] = useState(false);
-    const [virtualCursor, setVirtualCursor] = useState<{ x: number, y: number, isPinching: boolean, isFist: boolean, landmarks?: any[], grabStatus?: 'grabbed' | 'miss' | null } | null>(null);
-    const lastGestureRef = useRef<{ x: number, y: number } | null>(null);
-    const grabbedElRef = useRef<{ id: string, offsetX: number, offsetY: number, element?: HTMLElement } | null>(null);
-    const wasPinchingRef = useRef(false);
-    const grabStatusRef = useRef<'grabbed' | 'miss' | null>(null);
-    const panVelocityRef = useRef({ x: 0, y: 0 });
-    const pinchReleaseCounterRef = useRef(0);
-    const fistActiveCounterRef = useRef(0);
+    const [virtualCursors, setVirtualCursors] = useState<(HandData & { grabStatus: 'grabbed' | 'miss' | null })[]>([]);
+
+    // Refs for Multi-Hand Gesture Logic
+    const handRefs = useRef<Record<string, {
+        lastGesture: { x: number, y: number } | null;
+        grabbedEl: { id: string, offsetX: number, offsetY: number, element?: HTMLElement } | null;
+        wasPinching: boolean;
+        grabStatus: 'grabbed' | 'miss' | null;
+        panVelocity: { x: number, y: number };
+        pinchReleaseCounter: number;
+        fistActiveCounter: number;
+    }>>({});
+
+    const getHandRef = (handedness: string) => {
+        if (!handRefs.current[handedness]) {
+            handRefs.current[handedness] = {
+                lastGesture: null,
+                grabbedEl: null,
+                wasPinching: false,
+                grabStatus: null,
+                panVelocity: { x: 0, y: 0 },
+                pinchReleaseCounter: 0,
+                fistActiveCounter: 0
+            };
+        }
+        return handRefs.current[handedness];
+    };
+
+    const dualHandRef = useRef<{
+        active: boolean;
+        elementId: string | null;
+        initialDist: number;
+        initialAngle: number;
+        initialScale: number;
+        initialRotation: number;
+        initialMidpoint: { x: number, y: number };
+        elementInitialPos: { x: number, y: number };
+        currentTransform: { x: number, y: number, scale: number, rotation: number } | null;
+    }>({
+        active: false,
+        elementId: null,
+        initialDist: 0,
+        initialAngle: 0,
+        initialScale: 1,
+        initialRotation: 0,
+        initialMidpoint: { x: 0, y: 0 },
+        elementInitialPos: { x: 0, y: 0 },
+        currentTransform: null
+    });
 
     // Passcode Challenge State
     const [passwordInput, setPasswordInput] = useState('');
@@ -115,10 +156,13 @@ export function Board({ roomId }: BoardProps) {
             const allElements = Object.values(store.elements);
             if (allElements.length === 0) return;
 
-            // Try to find latest by timestamp
+            // Try to find latest by modification time, then creation time
             let latest = allElements
-                .filter(el => el.createdAt)
-                .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+                .sort((a, b) => {
+                    const aTime = a.lastModifiedAt || a.createdAt || 0;
+                    const bTime = b.lastModifiedAt || b.createdAt || 0;
+                    return bTime - aTime;
+                })[0];
 
             // Fallback to any element if no timestamps
             if (!latest) {
@@ -196,11 +240,12 @@ export function Board({ roomId }: BoardProps) {
     // --- Handlers ---
 
     const handleDragUpdate = (id: string, newWorldX: number, newWorldY: number, final: boolean) => {
+        const updates = { x: newWorldX, y: newWorldY, lastModifiedAt: Date.now() };
         if (final) {
-            store.updateElement(id, { x: newWorldX, y: newWorldY });
-            broadcast({ type: 'UPDATE_ELEMENT', payload: { id, updates: { x: newWorldX, y: newWorldY } } });
+            store.updateElement(id, updates);
+            broadcast({ type: 'UPDATE_ELEMENT', payload: { id, updates } });
         } else {
-            broadcast({ type: 'UPDATE_ELEMENT', payload: { id, updates: { x: newWorldX, y: newWorldY } } });
+            broadcast({ type: 'UPDATE_ELEMENT', payload: { id, updates } });
         }
     }
 
@@ -214,14 +259,14 @@ export function Board({ roomId }: BoardProps) {
                 const zoomSensitivity = 0.002;
                 const delta = -e.deltaY * zoomSensitivity;
                 setViewport(prev => {
-                    const newScale = Math.min(Math.max(prev.scale + delta, 0.1), 5);
+                    const newScale = Math.min(Math.max(prev.scale + delta, 0.3), 5); // Min 0.3 to keep grid clean
                     return { ...prev, scale: newScale };
                 });
             } else {
                 const zoomSensitivity = 0.001;
                 const delta = -e.deltaY * zoomSensitivity;
                 setViewport(prev => {
-                    const newScale = Math.min(Math.max(prev.scale + delta, 0.1), 5);
+                    const newScale = Math.min(Math.max(prev.scale + delta, 0.3), 5); // Min 0.3 to keep grid clean
                     const rect = container.getBoundingClientRect();
                     const mouseX = e.clientX - rect.left;
                     const mouseY = e.clientY - rect.top;
@@ -430,234 +475,343 @@ export function Board({ roomId }: BoardProps) {
 
             <GestureController
                 enabled={gestureMode}
-                onCursorUpdate={(x, y, isPinching, isFist, landmarks) => {
-                    let interactionX = x;
-                    let interactionY = y;
+                onHandsUpdate={(hands) => {
+                    const newCursors: (HandData & { grabStatus: 'grabbed' | 'miss' | null })[] = [];
+                    const activeGrabs: { hand: string, elId: string, wX: number, wY: number, element: HTMLElement }[] = [];
 
-                    // Use Midpoint between Thumb (4) and Index (8) for better accuracy
-                    if (landmarks && landmarks.length > 8) {
-                        const thumb = landmarks[4];
-                        const index = landmarks[8];
-                        // Mirror X coordinate (camera is mirrored)
-                        const thumbScreenX = (1 - thumb.x) * window.innerWidth;
-                        const indexScreenX = (1 - index.x) * window.innerWidth;
-                        const thumbScreenY = thumb.y * window.innerHeight;
-                        const indexScreenY = index.y * window.innerHeight;
+                    hands.forEach(hand => {
+                        const refs = getHandRef(hand.handedness);
+                        const { landmarks, isPinching, isFist } = hand;
 
-                        interactionX = (thumbScreenX + indexScreenX) / 2;
-                        interactionY = (thumbScreenY + indexScreenY) / 2;
-                    }
+                        // Interaction Point Logic
+                        let interactionX = hand.x;
+                        let interactionY = hand.y;
 
-                    // Use ref for grab status to persist across renders
-                    let currentGrabStatus = grabStatusRef.current;
+                        // Use Midpoint between Thumb (4) and Index (8)
+                        if (landmarks && landmarks.length > 8) {
+                            const thumb = landmarks[4];
+                            const index = landmarks[8];
+                            // Mirror X
+                            const thumbScreenX = (1 - thumb.x) * window.innerWidth;
+                            const indexScreenX = (1 - index.x) * window.innerWidth;
+                            const thumbScreenY = thumb.y * window.innerHeight;
+                            const indexScreenY = index.y * window.innerHeight;
 
-                    // Track interaction point for drag (even if temporarily not pinching due to flicker)
-                    const v = viewportRef.current;
-                    const wX = (interactionX - v.x) / v.scale;
-                    const wY = (interactionY - v.y) / v.scale;
+                            interactionX = (thumbScreenX + indexScreenX) / 2;
+                            interactionY = (thumbScreenY + indexScreenY) / 2;
+                        }
 
-                    // --- PINCH GRAB LOGIC with DEBOUNCE ---
-                    // If we're currently holding something, be very sticky about it
-                    const isHolding = grabbedElRef.current !== null && grabStatusRef.current === 'grabbed';
+                        // Use ref for grab status
+                        let currentGrabStatus = refs.grabStatus;
 
-                    if (isPinching) {
-                        // Reset release counter when pinching
-                        pinchReleaseCounterRef.current = 0;
+                        // Track interaction point for drag
+                        const v = viewportRef.current;
+                        const wX = (interactionX - v.x) / v.scale;
+                        const wY = (interactionY - v.y) / v.scale;
 
-                        if (!isHolding && !wasPinchingRef.current) {
-                            // PINCH START - Find element under cursor
-                            const candidates = document.querySelectorAll('[data-element-id]');
-                            let bestElement: HTMLElement | null = null;
-                            let bestElementId: string | null = null;
-                            let minDist = Infinity;
-                            const SEARCH_RADIUS = 100; // px - larger for easier grabbing
+                        // --- PINCH GRAB LOGIC ---
+                        const isHolding = refs.grabbedEl !== null && refs.grabStatus === 'grabbed';
 
-                            candidates.forEach((el) => {
-                                const rect = el.getBoundingClientRect();
-                                const centerX = rect.left + rect.width / 2;
-                                const centerY = rect.top + rect.height / 2;
+                        if (isPinching) {
+                            refs.pinchReleaseCounter = 0;
 
-                                // Check if point inside rect
-                                const inside = interactionX >= rect.left && interactionX <= rect.right &&
-                                    interactionY >= rect.top && interactionY <= rect.bottom;
+                            if (!isHolding && !refs.wasPinching) {
+                                // PINCH START
+                                const candidates = document.querySelectorAll('[data-element-id]');
+                                let bestElement: HTMLElement | null = null;
+                                let bestElementId: string | null = null;
+                                let minDist = Infinity;
+                                const SEARCH_RADIUS = 100;
 
-                                const dist = Math.hypot(interactionX - centerX, interactionY - centerY);
+                                candidates.forEach((el) => {
+                                    const rect = el.getBoundingClientRect();
+                                    const centerX = rect.left + rect.width / 2;
+                                    const centerY = rect.top + rect.height / 2;
+                                    const inside = interactionX >= rect.left && interactionX <= rect.right &&
+                                        interactionY >= rect.top && interactionY <= rect.bottom;
+                                    const dist = Math.hypot(interactionX - centerX, interactionY - centerY);
 
-                                if (inside) {
-                                    const score = -1000 + dist;
-                                    if (score < minDist) {
-                                        minDist = score;
+                                    if (inside) {
+                                        const score = -1000 + dist;
+                                        if (score < minDist) {
+                                            minDist = score;
+                                            bestElement = el as HTMLElement;
+                                            bestElementId = bestElement.dataset.elementId || null;
+                                        }
+                                    } else if (dist < SEARCH_RADIUS && dist < minDist) {
+                                        minDist = dist;
                                         bestElement = el as HTMLElement;
                                         bestElementId = bestElement.dataset.elementId || null;
                                     }
-                                } else if (dist < SEARCH_RADIUS && dist < minDist) {
-                                    minDist = dist;
-                                    bestElement = el as HTMLElement;
-                                    bestElementId = bestElement.dataset.elementId || null;
+                                });
+
+                                if (bestElementId && bestElement) {
+                                    // GRAB SUCCESS
+                                    currentGrabStatus = 'grabbed';
+                                    refs.grabStatus = 'grabbed';
+
+                                    // Calc offset - USE FRESH STATE
+                                    const freshElements = useBoardStore.getState().elements;
+                                    const elementData = freshElements[bestElementId];
+                                    const currentX = elementData?.x || 0;
+                                    const currentY = elementData?.y || 0;
+
+                                    refs.grabbedEl = {
+                                        id: bestElementId,
+                                        offsetX: wX - currentX,
+                                        offsetY: wY - currentY,
+                                        element: bestElement
+                                    };
+                                } else {
+                                    // GRAB MISS
+                                    currentGrabStatus = 'miss';
+                                    refs.grabStatus = 'miss';
+                                    refs.grabbedEl = null;
+                                }
+                            }
+                        } else {
+                            // NOT PINCHING
+                            if (isHolding) {
+                                refs.pinchReleaseCounter++;
+                                if (refs.pinchReleaseCounter >= 5) {
+                                    // RELEASE
+                                    if (refs.grabbedEl) {
+                                        // Final update for Single hand logic - ONLY if not dual
+                                        if (!dualHandRef.current.active) {
+                                            const newX = wX - refs.grabbedEl.offsetX;
+                                            const newY = wY - refs.grabbedEl.offsetY;
+                                            handleDragUpdate(refs.grabbedEl.id, newX, newY, true);
+                                        }
+                                    }
+                                    refs.grabbedEl = null;
+                                    currentGrabStatus = null;
+                                    refs.grabStatus = null;
+                                    refs.pinchReleaseCounter = 0;
+                                }
+                            } else {
+                                if (refs.grabStatus !== null) {
+                                    currentGrabStatus = null;
+                                    refs.grabStatus = null;
+                                }
+                                refs.pinchReleaseCounter = 0;
+                            }
+                        }
+
+                        refs.wasPinching = isPinching;
+
+                        // Hand Panning vs Grab
+                        const canFistPan = isFist && !isPinching && !refs.grabbedEl && refs.grabStatus === null && refs.pinchReleaseCounter === 0;
+
+                        if (canFistPan) {
+                            refs.fistActiveCounter++;
+                            if (refs.fistActiveCounter >= 3) {
+                                if (refs.lastGesture) {
+                                    const dx = interactionX - refs.lastGesture.x;
+                                    const dy = interactionY - refs.lastGesture.y;
+                                    refs.panVelocity = {
+                                        x: refs.panVelocity.x * 0.6 + dx * 0.4,
+                                        y: refs.panVelocity.y * 0.6 + dy * 0.4
+                                    };
+                                    setViewport(prev => ({
+                                        ...prev,
+                                        x: prev.x + refs.panVelocity.x,
+                                        y: prev.y + refs.panVelocity.y
+                                    }));
+                                }
+                                refs.lastGesture = { x: interactionX, y: interactionY };
+                            }
+                        } else {
+                            refs.fistActiveCounter = 0;
+                            refs.lastGesture = null;
+                            refs.panVelocity = { x: 0, y: 0 };
+                        }
+
+                        // Collect Active Grab Info
+                        if (refs.grabbedEl && refs.grabStatus === 'grabbed' && refs.grabbedEl.element) {
+                            activeGrabs.push({
+                                hand: hand.handedness,
+                                elId: refs.grabbedEl.id,
+                                wX: wX,
+                                wY: wY,
+                                element: refs.grabbedEl.element
+                            });
+                        }
+
+                        newCursors.push({
+                            ...hand,
+                            x: interactionX,
+                            y: interactionY,
+                            grabStatus: currentGrabStatus
+                        });
+                    });
+
+                    // --- DUAL HAND LOGIC ---
+                    const leftGrab = activeGrabs.find(g => g.hand === 'Left');
+                    const rightGrab = activeGrabs.find(g => g.hand === 'Right');
+                    const dual = dualHandRef.current;
+                    const freshElements = useBoardStore.getState().elements;
+
+                    if (leftGrab && rightGrab && leftGrab.elId === rightGrab.elId) {
+                        // BOTH HANDS GRABBING SAME ELEMENT
+                        const elId = leftGrab.elId;
+                        const el = leftGrab.element;
+                        const elData = freshElements[elId];
+
+                        const dx = rightGrab.wX - leftGrab.wX;
+                        const dy = rightGrab.wY - leftGrab.wY;
+                        const dist = Math.hypot(dx, dy);
+                        const angle = Math.atan2(dy, dx); // Radians
+                        const mx = (leftGrab.wX + rightGrab.wX) / 2;
+                        const my = (leftGrab.wY + rightGrab.wY) / 2;
+
+                        if (!dual.active || dual.elementId !== elId) {
+                            // START DUAL GESTURE
+                            if (elData) {
+                                // Calculate ACTUAL current position from whichever hand was already dragging
+                                // This prevents jump when transitioning from single to dual drag
+                                const leftRefs = getHandRef('Left');
+                                const rightRefs = getHandRef('Right');
+                                let currentX = elData.x;
+                                let currentY = elData.y;
+
+                                // If left hand was already dragging, use its calculated position
+                                if (leftRefs.grabbedEl && leftRefs.grabbedEl.id === elId) {
+                                    currentX = leftGrab.wX - leftRefs.grabbedEl.offsetX;
+                                    currentY = leftGrab.wY - leftRefs.grabbedEl.offsetY;
+                                } else if (rightRefs.grabbedEl && rightRefs.grabbedEl.id === elId) {
+                                    currentX = rightGrab.wX - rightRefs.grabbedEl.offsetX;
+                                    currentY = rightGrab.wY - rightRefs.grabbedEl.offsetY;
+                                }
+
+                                dual.active = true;
+                                dual.elementId = elId;
+                                dual.initialDist = dist;
+                                dual.initialAngle = angle;
+                                dual.initialScale = elData.scale || 1;
+                                dual.initialRotation = elData.rotation || 0;
+                                dual.initialMidpoint = { x: mx, y: my };
+                                dual.elementInitialPos = { x: currentX, y: currentY };
+                                dual.currentTransform = { x: currentX, y: currentY, scale: elData.scale || 1, rotation: elData.rotation || 0 };
+                            }
+                        } else {
+                            // UPDATE DUAL GESTURE
+                            const scaleFactor = dist / Math.max(dual.initialDist, 0.001);
+                            const newScale = Math.max(0.1, dual.initialScale * scaleFactor); // No max limit - infinite scaling
+                            const angleDiff = angle - dual.initialAngle;
+                            const newRotation = dual.initialRotation + (angleDiff * 180 / Math.PI);
+
+                            // Position: follow midpoint of hands with offset from initial grab
+                            const panX = mx - dual.initialMidpoint.x;
+                            const panY = my - dual.initialMidpoint.y;
+                            const newX = dual.elementInitialPos.x + panX;
+                            const newY = dual.elementInitialPos.y + panY;
+
+                            // Apply to DOM - use fontSize for text, scale for others
+                            if (elData?.type === 'text') {
+                                el.style.transform = `translate(${newX}px, ${newY}px) rotate(${newRotation}deg)`;
+                                el.style.fontSize = `${18 * newScale}px`;
+                            } else {
+                                el.style.transform = `translate(${newX}px, ${newY}px) rotate(${newRotation}deg) scale(${newScale})`;
+                            }
+
+                            // Update Dual State
+                            dual.currentTransform = { x: newX, y: newY, scale: newScale, rotation: newRotation };
+
+                            // Broadcast
+                            broadcast({
+                                type: 'UPDATE_ELEMENT',
+                                payload: {
+                                    id: elId,
+                                    updates: { x: newX, y: newY, scale: newScale, rotation: newRotation, lastModifiedAt: Date.now() }
                                 }
                             });
-
-                            if (bestElementId && bestElement) {
-                                // GRAB SUCCESS
-                                currentGrabStatus = 'grabbed';
-                                grabStatusRef.current = 'grabbed';
-
-                                // Get current position from DOM transform (more accurate than store which may be stale)
-                                // Parse the transform: translate(Xpx, Ypx)
-                                const el = bestElement as HTMLElement;
-                                const transformStyle = el.style.transform;
-                                let currentX = 0;
-                                let currentY = 0;
-
-                                if (transformStyle) {
-                                    const match = transformStyle.match(/translate\(([^,]+)px,\s*([^)]+)px\)/);
-                                    if (match) {
-                                        currentX = parseFloat(match[1]);
-                                        currentY = parseFloat(match[2]);
+                        }
+                    } else {
+                        // NOT DUAL GRABBING (OR LOST ONE HAND)
+                        if (dual.active) {
+                            // Commit Final State
+                            if (dual.currentTransform && dual.elementId) {
+                                const finalUpdates = { ...dual.currentTransform, lastModifiedAt: Date.now() };
+                                store.updateElement(dual.elementId, finalUpdates);
+                                broadcast({
+                                    type: 'UPDATE_ELEMENT',
+                                    payload: {
+                                        id: dual.elementId,
+                                        updates: finalUpdates
                                     }
-                                }
+                                });
+                            }
+                            dual.active = false;
+                            dual.elementId = null;
+                            dual.currentTransform = null;
 
-                                // Fallback to store if transform parsing failed
-                                if (currentX === 0 && currentY === 0) {
-                                    const elementData = store.elements[bestElementId];
+                            // Re-sync offsets for active hands to prevent jumping - USE FRESH STATE
+                            const updatedElements = useBoardStore.getState().elements;
+                            activeGrabs.forEach(g => {
+                                const refs = getHandRef(g.hand);
+                                if (refs.grabbedEl && refs.grabbedEl.id === g.elId) {
+                                    const elementData = updatedElements[g.elId];
                                     if (elementData) {
-                                        currentX = elementData.x;
-                                        currentY = elementData.y;
+                                        refs.grabbedEl.offsetX = g.wX - elementData.x;
+                                        refs.grabbedEl.offsetY = g.wY - elementData.y;
+                                    }
+                                }
+                            });
+                        }
+
+                        // SINGLE HAND DRAG UPDATES
+                        activeGrabs.forEach(g => {
+                            const refs = getHandRef(g.hand);
+                            if (refs.grabbedEl && refs.grabbedEl.id === g.elId) {
+                                const newX = g.wX - refs.grabbedEl.offsetX;
+                                const newY = g.wY - refs.grabbedEl.offsetY;
+
+                                if (refs.grabbedEl.element) {
+                                    // USE FRESH STATE for rotation/scale
+                                    const elData = useBoardStore.getState().elements[g.elId];
+                                    const rot = elData?.rotation || 0;
+                                    const scl = elData?.scale || 1;
+
+                                    // Use fontSize for text, scale for others
+                                    if (elData?.type === 'text') {
+                                        refs.grabbedEl.element.style.transform = `translate(${newX}px, ${newY}px) rotate(${rot}deg)`;
+                                        refs.grabbedEl.element.style.fontSize = `${18 * scl}px`;
+                                    } else {
+                                        refs.grabbedEl.element.style.transform = `translate(${newX}px, ${newY}px) rotate(${rot}deg) scale(${scl})`;
                                     }
                                 }
 
-                                grabbedElRef.current = {
-                                    id: bestElementId,
-                                    offsetX: wX - currentX,
-                                    offsetY: wY - currentY,
-                                    element: bestElement
-                                };
-                            } else {
-                                // GRAB MISS
-                                currentGrabStatus = 'miss';
-                                grabStatusRef.current = 'miss';
-                                grabbedElRef.current = null;
+                                handleDragUpdate(g.elId, newX, newY, false);
                             }
-                        }
-                    } else {
-                        // NOT PINCHING - but maybe just a flicker?
-                        if (isHolding) {
-                            // Increment release counter
-                            pinchReleaseCounterRef.current++;
-
-                            // Only release after N consecutive non-pinch frames (debounce)
-                            const RELEASE_THRESHOLD = 5;
-                            if (pinchReleaseCounterRef.current >= RELEASE_THRESHOLD) {
-                                // Actually release now
-                                if (grabbedElRef.current) {
-                                    const newX = wX - grabbedElRef.current.offsetX;
-                                    const newY = wY - grabbedElRef.current.offsetY;
-                                    handleDragUpdate(grabbedElRef.current.id, newX, newY, true);
-                                }
-                                grabbedElRef.current = null;
-                                currentGrabStatus = null;
-                                grabStatusRef.current = null;
-                                pinchReleaseCounterRef.current = 0;
-                            }
-                            // If under threshold, stay in grabbed state (ignore flicker)
-                        } else {
-                            // Not holding anything, safe to reset
-                            if (grabStatusRef.current !== null) {
-                                currentGrabStatus = null;
-                                grabStatusRef.current = null;
-                            }
-                            pinchReleaseCounterRef.current = 0;
-                        }
+                        });
                     }
 
-                    // DRAG - Always update position while holding (even during flicker)
-                    if (grabbedElRef.current && grabStatusRef.current === 'grabbed') {
-                        const newX = wX - grabbedElRef.current.offsetX;
-                        const newY = wY - grabbedElRef.current.offsetY;
-
-                        // Direct DOM update for smooth visual
-                        if (grabbedElRef.current.element) {
-                            grabbedElRef.current.element.style.transform = `translate(${newX}px, ${newY}px)`;
-                        }
-
-                        // Throttled store update for sync
-                        handleDragUpdate(grabbedElRef.current.id, newX, newY, false);
-                    }
-
-                    wasPinchingRef.current = isPinching;
-
-                    // FIST PAN - Completely blocked during grab/pinch activity
-                    // Must NOT be pinching, NOT holding anything, and NOT in any grab state
-                    const canFistPan = isFist &&
-                        !isPinching &&
-                        !grabbedElRef.current &&
-                        grabStatusRef.current === null &&
-                        pinchReleaseCounterRef.current === 0;
-
-                    if (canFistPan) {
-                        // Debounce fist activation to prevent accidental triggers
-                        fistActiveCounterRef.current++;
-
-                        // Only start panning after 3 consecutive fist frames
-                        if (fistActiveCounterRef.current >= 3) {
-                            if (lastGestureRef.current) {
-                                const dx = interactionX - lastGestureRef.current.x;
-                                const dy = interactionY - lastGestureRef.current.y;
-
-                                // Smooth pan using lerp
-                                panVelocityRef.current = {
-                                    x: panVelocityRef.current.x * 0.6 + dx * 0.4,
-                                    y: panVelocityRef.current.y * 0.6 + dy * 0.4
-                                };
-
-                                setViewport(prev => ({
-                                    ...prev,
-                                    x: prev.x + panVelocityRef.current.x,
-                                    y: prev.y + panVelocityRef.current.y
-                                }));
-                            }
-                            lastGestureRef.current = { x: interactionX, y: interactionY };
-                        }
-                    } else {
-                        // Reset fist tracking
-                        fistActiveCounterRef.current = 0;
-                        lastGestureRef.current = null;
-                        panVelocityRef.current = { x: 0, y: 0 };
-                    }
-
-                    // Update State for visuals
-                    setVirtualCursor({
-                        x: interactionX,
-                        y: interactionY,
-                        isPinching,
-                        isFist,
-                        landmarks,
-                        grabStatus: currentGrabStatus
-                    });
+                    setVirtualCursors(newCursors);
                 }}
             />
 
             {/* Virtual Gesture Overlay */}
-            {gestureMode && virtualCursor && (
-                <div className="fixed inset-0 z-[1000] pointer-events-none overflow-hidden">
+            {/* Virtual Gesture Overlay */}
+            {gestureMode && virtualCursors.map((cursor, idx) => (
+                <div key={idx} className="fixed inset-0 z-[1000] pointer-events-none overflow-hidden">
 
                     {/* Interaction Midpoint Indicator */}
                     <div
                         className={cn(
                             "absolute w-3 h-3 rounded-full z-50",
-                            virtualCursor.grabStatus === 'grabbed' ? "bg-green-400/70" :
-                                virtualCursor.grabStatus === 'miss' ? "bg-red-400/70" :
+                            cursor.grabStatus === 'grabbed' ? "bg-green-400/70" :
+                                cursor.grabStatus === 'miss' ? "bg-red-400/70" :
                                     "bg-yellow-400/50"
                         )}
                         style={{
-                            left: virtualCursor.x,
-                            top: virtualCursor.y,
+                            left: cursor.x,
+                            top: cursor.y,
                             transform: 'translate(-50%, -50%)'
                         }}
                     />
 
                     {/* Hand Landmarks - NO TRANSITIONS for instant tracking */}
-                    {virtualCursor.landmarks && virtualCursor.landmarks.map((point: any, i: number) => {
+                    {cursor.landmarks && cursor.landmarks.map((point: any, i: number) => {
                         const isTip = [4, 8, 12, 16, 20].includes(i);
                         const isActionFinger = (i === 4 || i === 8);
 
@@ -669,12 +823,12 @@ export function Board({ roomId }: BoardProps) {
                             let bgColor = 'rgba(255,255,255,1)';
                             let shadow = '0 0 15px rgba(255,255,255,0.8)';
 
-                            if (isActionFinger && virtualCursor.isPinching) {
+                            if (isActionFinger && cursor.isPinching) {
                                 size = 24; // w-6 = 24px
-                                if (virtualCursor.grabStatus === 'grabbed') {
+                                if (cursor.grabStatus === 'grabbed') {
                                     bgColor = '#22c55e';
                                     shadow = '0 0 20px #22c55e';
-                                } else if (virtualCursor.grabStatus === 'miss') {
+                                } else if (cursor.grabStatus === 'miss') {
                                     bgColor = '#ef4444';
                                     shadow = '0 0 20px #ef4444';
                                 } else {
@@ -721,7 +875,7 @@ export function Board({ roomId }: BoardProps) {
                         )
                     })}
                 </div>
-            )}
+            ))}
 
             <div
                 ref={containerRef}
@@ -812,6 +966,8 @@ const MemoizedDraggableElement = memo(DraggableElement, (prev, next) => {
         prev.data.x === next.data.x &&
         prev.data.y === next.data.y &&
         prev.data.content === next.data.content &&
+        prev.data.rotation === next.data.rotation &&
+        prev.data.scale === next.data.scale &&
         prev.activeTool === next.activeTool &&
         prev.scale === next.scale
     );
@@ -895,12 +1051,13 @@ function DraggableElement({
             // Add data-element-id here for Gesture Hit Testing
             data-element-id={data.id}
             className={cn(
-                "absolute top-0 left-0 transition-shadow group select-none touch-none will-change-transform",
+                "absolute top-0 left-0 transition-shadow group select-none touch-none will-change-transform origin-top-left",
                 activeTool === 'select' ? "cursor-grab active:cursor-grabbing hover:ring-2 ring-primary/50" : "pointer-events-none",
                 data.type === 'image' && "p-0",
             )}
             style={{
-                transform: `translate(${data.x}px, ${data.y}px)`
+                transform: `translate(${data.x}px, ${data.y}px) rotate(${data.rotation || 0}deg)${data.type !== 'text' ? ` scale(${data.scale || 1})` : ''}`,
+                fontSize: data.type === 'text' ? `${18 * (data.scale || 1)}px` : undefined,
             }}
             onPointerDown={handlePointerDown}
         >
@@ -920,7 +1077,7 @@ function DraggableElement({
                 )}
 
                 {data.type === 'text' && (
-                    <div className="outline-none whitespace-pre-wrap max-w-md font-medium text-lg leading-relaxed text-balance">
+                    <div className="outline-none whitespace-pre-wrap max-w-none font-medium leading-relaxed text-balance">
                         {data.content}
                     </div>
                 )}
