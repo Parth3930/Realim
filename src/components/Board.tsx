@@ -69,6 +69,7 @@ export function Board({ roomId }: BoardProps) {
             if (val && Object.keys(val).length > 0) {
                 // We have saved content - we're the host of this board
                 store.setIsHost(true);
+                localStorage.setItem(`realim_is_host_${roomId}`, 'true');
                 if (Object.keys(store.elements).length === 0) {
                     // Load saved state to store
                     Object.values(val).forEach((el: any) => store.addElement(el));

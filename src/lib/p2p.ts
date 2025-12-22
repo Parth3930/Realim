@@ -34,14 +34,17 @@ export function useP2P(roomId: string | null) {
         sendActionRef.current = sendAction;
 
         const hostPassword = localStorage.getItem(`room_pass_${roomId}`);
+        const isHostMarker = localStorage.getItem(`realim_is_host_${roomId}`);
         const initialJoinPass = sessionStorage.getItem(`join_pass_${roomId}`);
 
         // Determine if we're the host based on:
-        // 1. We have a host password stored (we created the room with password)
-        // 2. OR we have elements in IndexedDB (we created content before)
-        // If neither, we'll determine based on who connects first
-        const isCreator = !!hostPassword;
-        store.setIsHost(isCreator);
+        // 1. We have a host password stored (created with password)
+        // 2. We have the explicit host marker (created without password)
+        // 3. We have elements in IndexedDB (re-joining a board we contributed to - optional heuristics)
+        const isCreator = !!hostPassword || isHostMarker === 'true';
+
+        // Only set if true, otherwise leave default or allow overlap
+        if (isCreator) store.setIsHost(true);
 
         // --- Event Handlers ---
 
@@ -50,19 +53,31 @@ export function useP2P(roomId: string | null) {
             store.addPeer(peerId);
             setIsConnected(true);
 
+            // Get Fresh State
+            const state = useBoardStore.getState();
+
             // Send our cursor position to the new peer
             sendAction({
                 type: 'CURSOR_MOVE',
-                payload: { x: 0, y: 0, userId: store.userId, username: store.username, color: '#8b5cf6' }
+                payload: { x: 0, y: 0, userId: state.userId, username: state.username, color: '#8b5cf6' }
             }, peerId);
 
-            // If we're the host (have content or password), send sync immediately
-            if (store.isHost || Object.keys(store.elements).length > 0) {
-                if (!hostPassword) {
-                    // No password, share freely
-                    sendAction({ type: 'SYNC_RESP', payload: { elements: store.elements } }, peerId);
-                    store.setIsHost(true); // We're sharing, so we're the host
+            // Mesh Sync: If we have data, share it!
+            // We don't need to be "The Host", just have data.
+            if (Object.keys(state.elements).length > 0) {
+                // Check if protected
+                if (hostPassword) {
+                    // If protected, check if we are host
+                    if (state.isHost) {
+                        sendAction({ type: 'SYNC_RESP', payload: { elements: state.elements } }, peerId);
+                    }
+                } else {
+                    // Public board: Share freely
+                    sendAction({ type: 'SYNC_RESP', payload: { elements: state.elements } }, peerId);
                 }
+            } else if (state.isHost) {
+                // We are host but empty board - share emptiness to confirm state
+                sendAction({ type: 'SYNC_RESP', payload: { elements: {} } }, peerId);
             }
         });
 
@@ -73,30 +88,42 @@ export function useP2P(roomId: string | null) {
         });
 
         getAction((data: Action, peerId) => {
+            const state = useBoardStore.getState();
+
             switch (data.type) {
                 case 'SYNC_REQ':
-                    // Someone is requesting sync - we must be the host if we respond
+                    // Someone is requesting sync
                     if (hostPassword) {
                         if (data.payload?.password === hostPassword) {
-                            sendAction({ type: 'SYNC_RESP', payload: { elements: store.elements } }, peerId);
-                            store.setIsHost(true);
+                            sendAction({ type: 'SYNC_RESP', payload: { elements: state.elements } }, peerId);
+                            store.setIsHost(true); // Re-affirm host status
+                            localStorage.setItem(`realim_is_host_${roomId}`, 'true');
                         } else {
                             sendAction({ type: 'ACCESS_DENIED', payload: { reason: 'Incorrect Password' } }, peerId);
                         }
                     } else {
-                        // Open Board - share freely (even if empty)
-                        // Only respond if we actually have content (meaning we're the host)
-                        if (Object.keys(store.elements).length > 0 || store.isHost) {
-                            sendAction({ type: 'SYNC_RESP', payload: { elements: store.elements } }, peerId);
-                            store.setIsHost(true);
+                        // Public Board - Anyone with data acts as seed
+                        if (Object.keys(state.elements).length > 0 || state.isHost) {
+                            sendAction({ type: 'SYNC_RESP', payload: { elements: state.elements } }, peerId);
+                            if (state.elements && Object.keys(state.elements).length === 0 && state.isHost) {
+                                // If we are host of empty board, ensure we claim it
+                                store.setIsHost(true);
+                                localStorage.setItem(`realim_is_host_${roomId}`, 'true');
+                            }
                         }
                     }
                     break;
 
                 case 'SYNC_RESP':
-                    // We received data from host, so we're definitely a guest
-                    store.setIsHost(false);
-                    store.setElements(data.payload.elements);
+                    // We received data. Merge it!
+                    // If we receive data, we are consuming, so we generally aren't the "Authoritative Host" in the traditional sense,
+                    // BUT in mesh, everyone is equal.
+                    // However, for "Clear Board" privs, we usually want the original creator.
+                    // So we DON'T set isHost(false) blindly if we already think we are host.
+                    // Only set isHost(false) if we definitely shouldn't be (e.g. we failed auth).
+                    // Actually, if we accept data, it just means we are syncing.
+
+                    store.mergeElements(data.payload.elements);
                     setAccessDenied(false);
                     break;
 

@@ -81,6 +81,7 @@ interface BoardState {
     removePeer: (peerId: string) => void;
 
     saveRoom: (id: string) => void;
+    mergeElements: (elements: Record<string, BoardElement>) => void;
 }
 
 const ADJECTIVES = ['Happy', 'Bright', 'Glow', 'Neon', 'Swift', 'Silent', 'Cosmic', 'Solar', 'Lunar', 'Vivid'];
@@ -158,6 +159,10 @@ export const useBoardStore = create<BoardState>()(
                 const updated = [{ id, lastVisited: Date.now() }, ...existing].slice(0, 5);
                 return { savedRooms: updated };
             }),
+
+            mergeElements: (newElements) => set((state) => ({
+                elements: { ...state.elements, ...newElements }
+            })),
         }),
         {
             name: 'realim-storage',
@@ -166,7 +171,6 @@ export const useBoardStore = create<BoardState>()(
                 userId: state.userId,
                 // We persist username so it doesn't randomise on reload
                 username: state.username,
-                elements: state.elements,
                 savedRooms: state.savedRooms
             }),
         }
