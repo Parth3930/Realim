@@ -20,20 +20,25 @@ const safeLocalStorage: StateStorage = {
 
 // --- Types ---
 
-export type ElementType = 'text' | 'image' | 'sticky';
+export type ElementType = 'text' | 'image' | 'sticky' | 'music';
 
 export interface BoardElement {
     id: string;
     type: ElementType;
     x: number;
     y: number;
-    content: string; // For draw type, this stores SVG path data
+    content: string; // For music, this stores the Spotify Link
     width?: number;
     height?: number;
     rotation?: number;
     scale?: number;
     font?: string;
     fontWeight?: number;
+    // Music Specific
+    isPlaying?: boolean;
+    playbackTime?: number; // Current playback time in seconds
+    lastSyncedAt?: number; // Timestamp when playbackTime was updated (for drift correction)
+
     createdBy: string;
     createdAt?: number; // Timestamp for sorting/auto-scroll
     lastModifiedAt?: number; // Timestamp when element was last moved/modified
