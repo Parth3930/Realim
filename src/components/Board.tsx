@@ -1343,6 +1343,8 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
                 start: startSeconds,
                 rel: 0,
                 modestbranding: 1,
+                enablejsapi: 1,
+                origin: window.location.origin,
             },
             events: {
                 onReady: (event: any) => {
