@@ -17,7 +17,10 @@ import {
     Plus,
     Key,
     Music,
-    Link2
+    Link2,
+    Play,
+    Pause,
+    Upload
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
@@ -1252,17 +1255,53 @@ export function Board({ roomId }: BoardProps) {
 
 // --- Music Element ---
 function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdate: (updates: Partial<BoardElement>) => void }) {
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const audioRef = useRef<HTMLAudioElement>(null);
+    const [localPlaying, setLocalPlaying] = useState(false);
 
-    // Determine Embed URL and Type
+    const isLocal = data.content.startsWith('data:audio');
+
+    // Handle File Upload
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        // Check size (limit to 15MB for browser perf/sync)
+        if (file.size > 15 * 1024 * 1024) {
+            alert("File too large! keep it under 15MB for board performance.");
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const result = ev.target?.result as string;
+            if (result) {
+                onUpdate({ content: result });
+            }
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const toggleLocalPlay = () => {
+        if (!audioRef.current) return;
+        if (localPlaying) {
+            audioRef.current.pause();
+        } else {
+            audioRef.current.play();
+        }
+        setLocalPlaying(!localPlaying);
+    };
+
+    // Determine Embed URL and Type (for non-local)
     const getEmbedInfo = (link: string) => {
+        if (link.startsWith('data:audio')) return { url: '', type: '💾 Local Audio' };
+
         try {
             // Check for YouTube
             if (link.includes('youtube.com') || link.includes('youtu.be')) {
                 const url = new URL(link);
                 let id = url.searchParams.get('v');
-                if (!id && link.includes('youtu.be')) {
-                    id = url.pathname.slice(1);
-                }
+                if (!id && link.includes('youtu.be')) id = url.pathname.slice(1);
                 const list = url.searchParams.get('list');
 
                 if (list) return { url: `https://www.youtube.com/embed/videoseries?list=${list}`, type: '📺 YouTube Playlist' };
@@ -1308,43 +1347,106 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
     const { url: embedUrl, type: mediaType } = getEmbedInfo(data.content);
 
     return (
-        <div className="w-[320px] h-[240px] bg-violet-950 rounded-xl flex flex-col overflow-hidden shadow-2xl border border-white/10 group/music cursor-auto" onPointerDown={(e) => e.stopPropagation()}>
-            {/* Embed Container */}
-            <div className="flex-1 relative bg-black/50 rounded-t-xl overflow-hidden">
-                <iframe
-                    src={embedUrl}
-                    width="100%"
-                    height="100%"
-                    frameBorder="0"
-                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                    loading="lazy"
-                    className="rounded-t-xl"
-                />
+        <div className="w-[320px] h-[240px] bg-violet-950 rounded-xl flex flex-col overflow-hidden shadow-2xl border border-white/10 group/music cursor-auto relative" onPointerDown={(e) => e.stopPropagation()}>
+            <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept="audio/*"
+                onChange={handleFileUpload}
+            />
+
+            {/* Content Area */}
+            <div className="flex-1 relative bg-black/50 rounded-t-xl overflow-hidden flex items-center justify-center">
+                {isLocal ? (
+                    <>
+                        <audio
+                            ref={audioRef}
+                            src={data.content}
+                            onEnded={() => setLocalPlaying(false)}
+                            onPause={() => setLocalPlaying(false)}
+                            onPlay={() => setLocalPlaying(true)}
+                            className="hidden"
+                        />
+                        {/* Pixel Disc Animation */}
+                        <div className={cn("transition-all duration-1000", localPlaying ? "animate-[spin_3s_linear_infinite]" : "")}>
+                            <svg viewBox="0 0 32 32" className="w-32 h-32 drop-shadow-2xl" shapeRendering="crispEdges">
+                                <circle cx="16" cy="16" r="15" fill="#111" />
+                                <circle cx="16" cy="16" r="14" fill="#050505" /> {/* Groove */}
+                                <circle cx="16" cy="16" r="12" fill="#111" /> {/* Groove */}
+                                <circle cx="16" cy="16" r="10" fill="#050505" /> {/* Groove */}
+                                <circle cx="16" cy="16" r="6" fill="#8b5cf6" />  {/* Label */}
+                                <circle cx="16" cy="16" r="2" fill="#000" />     {/* Hole */}
+                                {/* Pixel Glints */}
+                                <rect x="14" y="2" width="2" height="2" fill="#fff" fillOpacity="0.3" />
+                                <rect x="25" y="10" width="2" height="2" fill="#fff" fillOpacity="0.2" />
+                            </svg>
+                        </div>
+                    </>
+                ) : (
+                    <iframe
+                        src={embedUrl}
+                        width="100%"
+                        height="100%"
+                        frameBorder="0"
+                        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                        loading="lazy"
+                        className="rounded-t-xl"
+                    />
+                )}
             </div>
 
             {/* Footer */}
             <div className="h-[50px] bg-black/60 backdrop-blur-md px-3 flex items-center justify-between gap-2">
-                <div className="flex flex-col flex-1 min-w-0">
-                    <span className="text-white/60 text-[10px] truncate">{mediaType}</span>
-                    <span className="text-white/40 text-[9px]">
-                        {mediaType.includes('YouTube') ? 'Full playback enabled' : 'Log in for full songs'}
-                    </span>
+
+                {isLocal ? (
+                    // Local Audio Footer
+                    <div className="flex items-center gap-3 flex-1">
+                        <button
+                            onClick={toggleLocalPlay}
+                            className="p-2 bg-white text-black rounded-full hover:scale-105 active:scale-95 transition-all"
+                        >
+                            {localPlaying ? <Pause size={14} fill="black" /> : <Play size={14} fill="black" className="ml-0.5" />}
+                        </button>
+                        <span className="text-white/60 text-[10px] truncate flex-1">Local Audio File</span>
+                    </div>
+                ) : (
+                    // Embed Footer
+                    <div className="flex flex-col flex-1 min-w-0">
+                        <span className="text-white/60 text-[10px] truncate">{mediaType}</span>
+                        <span className="text-white/40 text-[9px]">
+                            {mediaType.includes('YouTube') ? 'Full playback enabled' : 'Log in for full songs'}
+                        </span>
+                    </div>
+                )}
+
+                {/* Controls */}
+                <div className="flex items-center gap-1">
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            fileInputRef.current?.click();
+                        }}
+                        className="p-2 text-white/70 hover:text-white transition-colors hover:bg-white/10 rounded-lg shrink-0"
+                        title="Upload audio file"
+                    >
+                        <Upload size={16} />
+                    </button>
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            const instructions = "Enter a Link:\n• Spotify (Track/Playlist/Album)\n• YouTube (Video/Playlist)";
+                            const newLink = prompt(instructions, data.content.startsWith('data:') ? '' : data.content);
+                            if (newLink) {
+                                onUpdate({ content: newLink });
+                            }
+                        }}
+                        className="p-2 text-white/70 hover:text-white transition-colors hover:bg-white/10 rounded-lg shrink-0"
+                        title="Change Link"
+                    >
+                        <Link2 size={16} />
+                    </button>
                 </div>
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        // Prompt user
-                        const instructions = "Enter a Link:\n• Spotify (Track/Playlist/Album)\n• YouTube (Video/Playlist)";
-                        const newLink = prompt(instructions, data.content);
-                        if (newLink && newLink !== data.content) {
-                            onUpdate({ content: newLink });
-                        }
-                    }}
-                    className="p-2 text-white/70 hover:text-white transition-colors hover:bg-white/10 rounded-lg shrink-0"
-                    title="Change music source"
-                >
-                    <Link2 size={16} />
-                </button>
             </div>
         </div>
     );
