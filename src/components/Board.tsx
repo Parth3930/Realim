@@ -17,9 +17,6 @@ import {
     Plus,
     Key,
     Music,
-    Play,
-    Pause,
-    SkipForward,
     Link2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -1255,163 +1252,80 @@ export function Board({ roomId }: BoardProps) {
 
 // --- Music Element ---
 function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdate: (updates: Partial<BoardElement>) => void }) {
-    const embedRef = useRef<HTMLDivElement>(null);
-    const controllerRef = useRef<any>(null);
-    const [duration, setDuration] = useState(0);
-    const [position, setPosition] = useState(0);
-    const [localPaused, setLocalPaused] = useState(!data.isPlaying); // Local play state mirror
-
-    // 1. Load Spotify Iframe API
-    useEffect(() => {
-        if (!document.getElementById('spotify-iframe-api')) {
-            const script = document.createElement('script');
-            script.id = 'spotify-iframe-api';
-            script.src = 'https://open.spotify.com/embed-podcast/iframe-api/v1';
-            script.async = true;
-            document.body.appendChild(script);
+    // Robust URI extraction - supports track, playlist, album, episode
+    const getSpotifyUri = (link: string) => {
+        try {
+            if (link.startsWith('spotify:')) return link;
+            const url = new URL(link);
+            const pathParts = url.pathname.split('/').filter(Boolean);
+            const type = pathParts[0];
+            const id = pathParts[1]?.split('?')[0];
+            if (!id) {
+                const lastPart = pathParts[pathParts.length - 1]?.split('?')[0];
+                return `spotify:track:${lastPart}`;
+            }
+            const supportedTypes = ['track', 'playlist', 'album', 'episode', 'show'];
+            if (supportedTypes.includes(type)) {
+                return `spotify:${type}:${id}`;
+            }
+            return `spotify:track:${id}`;
+        } catch {
+            const parts = link.split('/');
+            const id = parts[parts.length - 1]?.split('?')[0];
+            return `spotify:track:${id}`;
         }
-
-        const spotifyId = data.content.split('/').pop()?.split('?')[0];
-        if (!spotifyId) return;
-
-        // Ensure container is empty before creating
-        if (embedRef.current) {
-            embedRef.current.innerHTML = '';
-            const div = document.createElement('div');
-            embedRef.current.appendChild(div);
-
-            (window as any).onSpotifyIframeApiReady = (IFrameAPI: any) => {
-                const options = {
-                    uri: `spotify:track:${spotifyId}`,
-                    width: '100%',
-                    height: '100%',
-                    theme: 'dark'
-                };
-                const callback = (EmbedController: any) => {
-                    controllerRef.current = EmbedController;
-
-                    EmbedController.addListener('ready', () => {
-                        // Sync initial state
-                        if (data.isPlaying) {
-                            EmbedController.play();
-                            if (data.playbackTime) EmbedController.seek(data.playbackTime);
-                        }
-                    });
-
-                    EmbedController.addListener('playback_update', (e: any) => {
-                        setPosition(e.data.position / 1000);
-                        setDuration(e.data.duration / 1000);
-                        setLocalPaused(e.data.isPaused);
-                    });
-                };
-                IFrameAPI.createController(div, options, callback);
-            };
-        }
-    }, [data.content]);
-
-    // 2. Sync Effect (Remote -> Local)
-    useEffect(() => {
-        const c = controllerRef.current;
-        if (!c) return;
-
-        // If remote says playing but local is paused -> Play
-        if (data.isPlaying && localPaused) {
-            c.play();
-        }
-        // If remote says paused but local is playing -> Pause
-        else if (!data.isPlaying && !localPaused) {
-            c.pause();
-        }
-
-        // Seek correction (simple drift check)
-        // Only seek if difference is large (> 2s) to avoid glitching
-        if (data.playbackTime && Math.abs(data.playbackTime - position) > 2) {
-            c.seek(data.playbackTime);
-        }
-    }, [data.isPlaying, data.playbackTime]);
-
-
-    // 3. Handlers (Local -> Remote)
-    const togglePlay = () => {
-        const c = controllerRef.current;
-        if (!c) return;
-
-        const nextState = !data.isPlaying;
-        c.togglePlay();
-
-        onUpdate({
-            isPlaying: nextState,
-            playbackTime: position,
-            lastSyncedAt: Date.now()
-        });
     };
 
-    const skipForward = () => {
-        const c = controllerRef.current;
-        if (!c) return;
-        const newTime = position + 5;
-        c.seek(newTime);
-        onUpdate({ playbackTime: newTime });
+    // Convert URI to embed URL
+    const getEmbedUrl = (link: string) => {
+        const uri = getSpotifyUri(link);
+        const parts = uri.split(':');
+        if (parts.length >= 3) {
+            const type = parts[1];
+            const id = parts[2];
+            return `https://open.spotify.com/embed/${type}/${id}?utm_source=generator&theme=0`;
+        }
+        return link;
     };
 
-    const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const newTime = parseFloat(e.target.value);
-        const c = controllerRef.current;
-        if (c) {
-            c.seek(newTime);
-            setPosition(newTime); // Optimistic update
-        }
-        onUpdate({ playbackTime: newTime });
-    };
+    const embedUrl = getEmbedUrl(data.content);
 
     return (
-        <div className="w-[300px] h-[350px] bg-[#1a1a1a] rounded-xl flex flex-col overflow-hidden shadow-2xl border border-white/10 group/music cursor-auto" onPointerDown={(e) => e.stopPropagation()}>
-            {/* Spotify Embed Container */}
-            <div className="flex-1 relative bg-black pointer-events-none">
-                <div ref={embedRef} className="w-full h-full" />
+        <div className="w-[300px] h-[380px] bg-violet-950 rounded-xl flex flex-col overflow-hidden shadow-2xl border border-white/10 group/music cursor-auto" onPointerDown={(e) => e.stopPropagation()}>
+            {/* Spotify Embed - Full playback for logged-in users */}
+            <div className="flex-1 relative bg-black/50 rounded-t-xl overflow-hidden">
+                <iframe
+                    src={embedUrl}
+                    width="100%"
+                    height="100%"
+                    frameBorder="0"
+                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                    loading="lazy"
+                    className="rounded-t-xl"
+                />
             </div>
 
-            {/* Custom Controls */}
-            <div className="h-[90px] bg-[#121212] p-4 flex flex-col gap-2">
-                {/* Progress Bar */}
-                <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
-                    <span>{Math.floor(position / 60)}:{Math.floor(position % 60).toString().padStart(2, '0')}</span>
-                    <input
-                        type="range"
-                        min={0}
-                        max={duration || 100}
-                        value={position}
-                        onChange={handleSeek}
-                        className="flex-1 h-1 bg-white/10 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary cursor-pointer"
-                    />
-                    <span>{Math.floor(duration / 60)}:{Math.floor(duration % 60).toString().padStart(2, '0')}</span>
+            {/* Footer with login hint and change link button */}
+            <div className="h-[50px] bg-black/60 backdrop-blur-md px-3 flex items-center justify-between gap-2">
+                <div className="flex flex-col flex-1 min-w-0">
+                    <span className="text-white/60 text-[10px] truncate">
+                        {data.content.includes('playlist') ? '🎵 Playlist' : data.content.includes('album') ? '💿 Album' : '🎧 Track'}
+                    </span>
+                    <span className="text-white/40 text-[9px]">Click play → Log in for full songs</span>
                 </div>
-
-                {/* Buttons */}
-                <div className="flex items-center justify-center gap-4">
-                    <button onClick={togglePlay} className="p-2 bg-white text-black rounded-full hover:scale-105 active:scale-95 transition-all">
-                        {data.isPlaying ? <Pause size={18} fill="black" /> : <Play size={18} fill="black" className="ml-0.5" />}
-                    </button>
-                    <button onClick={skipForward} className="p-2 text-muted-foreground hover:text-white transition-colors">
-                        <div className="flex flex-col items-center leading-none">
-                            <SkipForward size={20} />
-                            <span className="text-[9px] font-bold">+5</span>
-                        </div>
-                    </button>
-                    {/* Link Button */}
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            const newLink = prompt("Enter new Spotify Link:", data.content);
-                            if (newLink && newLink !== data.content) {
-                                onUpdate({ content: newLink, isPlaying: false, playbackTime: 0 });
-                            }
-                        }}
-                        className="p-2 text-muted-foreground hover:text-white transition-colors absolute right-4 bottom-5"
-                    >
-                        <Link2 size={16} />
-                    </button>
-                </div>
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        const newLink = prompt("Enter Spotify Link (track, playlist, or album):", data.content);
+                        if (newLink && newLink !== data.content) {
+                            onUpdate({ content: newLink });
+                        }
+                    }}
+                    className="p-2 text-white/70 hover:text-white transition-colors hover:bg-white/10 rounded-lg shrink-0"
+                    title="Change music"
+                >
+                    <Link2 size={16} />
+                </button>
             </div>
         </div>
     );
@@ -1599,157 +1513,6 @@ function DraggableElement({
     )
 }
 
-// --- Music Element ---
-function MusicElement({ data, onUpdate }: { data: BoardElement, onUpdate: (updates: Partial<BoardElement>) => void }) {
-    const embedRef = useRef<HTMLDivElement>(null);
-    const controllerRef = useRef<any>(null);
-    const [duration, setDuration] = useState(0);
-    const [position, setPosition] = useState(0);
-    const [localPaused, setLocalPaused] = useState(!data.isPlaying); // Local play state mirror
-
-    // 1. Load Spotify Iframe API
-    useEffect(() => {
-        if (!document.getElementById('spotify-iframe-api')) {
-            const script = document.createElement('script');
-            script.id = 'spotify-iframe-api';
-            script.src = 'https://open.spotify.com/embed-podcast/iframe-api/v1';
-            script.async = true;
-            document.body.appendChild(script);
-        }
-
-        const spotifyId = data.content.split('/').pop()?.split('?')[0];
-        if (!spotifyId) return;
-
-        // Ensure container is empty before creating
-        if (embedRef.current) {
-            embedRef.current.innerHTML = '';
-            const div = document.createElement('div');
-            embedRef.current.appendChild(div);
-
-            (window as any).onSpotifyIframeApiReady = (IFrameAPI: any) => {
-                const options = {
-                    uri: `spotify:track:${spotifyId}`,
-                    width: '100%',
-                    height: '100%',
-                    theme: 'dark'
-                };
-                const callback = (EmbedController: any) => {
-                    controllerRef.current = EmbedController;
-
-                    EmbedController.addListener('ready', () => {
-                        // Sync initial state
-                        if (data.isPlaying) {
-                            EmbedController.play();
-                            if (data.playbackTime) EmbedController.seek(data.playbackTime);
-                        }
-                    });
-
-                    EmbedController.addListener('playback_update', (e: any) => {
-                        setPosition(e.data.position / 1000);
-                        setDuration(e.data.duration / 1000);
-                        setLocalPaused(e.data.isPaused);
-                    });
-                };
-                IFrameAPI.createController(div, options, callback);
-            };
-        }
-    }, [data.content]);
-
-    // 2. Sync Effect (Remote -> Local)
-    useEffect(() => {
-        const c = controllerRef.current;
-        if (!c) return;
-
-        // If remote says playing but local is paused -> Play
-        if (data.isPlaying && localPaused) {
-            c.play();
-        }
-        // If remote says paused but local is playing -> Pause
-        else if (!data.isPlaying && !localPaused) {
-            c.pause();
-        }
-
-        // Seek correction (simple drift check)
-        // Only seek if difference is large (> 2s) to avoid glitching
-        if (data.playbackTime && Math.abs(data.playbackTime - position) > 2) {
-            c.seek(data.playbackTime);
-        }
-    }, [data.isPlaying, data.playbackTime]);
-
-
-    // 3. Handlers (Local -> Remote)
-    const togglePlay = () => {
-        const c = controllerRef.current;
-        if (!c) return;
-
-        const nextState = !data.isPlaying;
-        c.togglePlay();
-
-        onUpdate({
-            isPlaying: nextState,
-            playbackTime: position,
-            lastSyncedAt: Date.now()
-        });
-    };
-
-    const skipForward = () => {
-        const c = controllerRef.current;
-        if (!c) return;
-        const newTime = position + 5;
-        c.seek(newTime);
-        onUpdate({ playbackTime: newTime });
-    };
-
-    const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const newTime = parseFloat(e.target.value);
-        const c = controllerRef.current;
-        if (c) {
-            c.seek(newTime);
-            setPosition(newTime); // Optimistic update
-        }
-        onUpdate({ playbackTime: newTime });
-    };
-
-    return (
-        <div className="w-[300px] h-[350px] bg-[#1a1a1a] rounded-xl flex flex-col overflow-hidden shadow-2xl border border-white/10 group/music">
-            {/* Spotify Embed Container */}
-            <div className="flex-1 relative bg-black">
-                <div ref={embedRef} className="w-full h-full" />
-                <div className="absolute inset-0 z-10 pointer-events-none group-hover/music:pointer-events-auto" /> {/* Use overlay to block direct iframe interaction if we want to force our controls, but user might want spotify controls. Let's allow pointer events. */}
-            </div>
-
-            {/* Custom Controls */}
-            <div className="h-[90px] bg-[#121212] p-4 flex flex-col gap-2">
-                {/* Progress Bar */}
-                <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
-                    <span>{Math.floor(position / 60)}:{Math.floor(position % 60).toString().padStart(2, '0')}</span>
-                    <input
-                        type="range"
-                        min={0}
-                        max={duration || 100}
-                        value={position}
-                        onChange={handleSeek}
-                        className="flex-1 h-1 bg-white/10 rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary"
-                    />
-                    <span>{Math.floor(duration / 60)}:{Math.floor(duration % 60).toString().padStart(2, '0')}</span>
-                </div>
-
-                {/* Buttons */}
-                <div className="flex items-center justify-center gap-4">
-                    <button onClick={togglePlay} className="p-2 bg-white text-black rounded-full hover:scale-105 active:scale-95 transition-all">
-                        {data.isPlaying ? <Pause size={18} fill="black" /> : <Play size={18} fill="black" className="ml-0.5" />}
-                    </button>
-                    <button onClick={skipForward} className="p-2 text-muted-foreground hover:text-white transition-colors">
-                        <div className="flex flex-col items-center leading-none">
-                            <SkipForward size={20} />
-                            <span className="text-[9px] font-bold">+5</span>
-                        </div>
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
 
 function ToolButton({ active, onClick, icon, label }: any) {
     return (
