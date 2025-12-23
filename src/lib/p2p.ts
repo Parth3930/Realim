@@ -11,14 +11,23 @@ type Action =
     | { type: 'ADD_ELEMENT'; payload: BoardElement }
     | { type: 'UPDATE_ELEMENT'; payload: { id: string; updates: Partial<BoardElement> } }
     | { type: 'DELETE_ELEMENT'; payload: { id: string } }
-    | { type: 'CURSOR_MOVE'; payload: UserCursor };
+    | { type: 'CURSOR_MOVE'; payload: UserCursor }
+    | { type: 'CONFETTI'; payload: { x: number; y: number } };
 
-export function useP2P(roomId: string | null) {
+interface P2PCallbacks {
+    onConfetti?: (x: number, y: number) => void;
+}
+
+export function useP2P(roomId: string | null, callbacks?: P2PCallbacks) {
     const store = useBoardStore();
     const roomRef = useRef<any>(null);
     const [accessDenied, setAccessDenied] = useState(false);
     const [isConnected, setIsConnected] = useState(false);
     const [peerCount, setPeerCount] = useState(0);
+
+    // Callbacks Ref
+    const callbacksRef = useRef(callbacks);
+    callbacksRef.current = callbacks;
 
     // Persist sendAction reference to call it outside
     const sendActionRef = useRef<any>(null);
@@ -108,7 +117,7 @@ export function useP2P(roomId: string | null) {
 
         getAction((data: Action, peerId) => {
             const state = useBoardStore.getState();
-            console.log(`[P2P] Received action from ${peerId}:`, data.type);
+            // console.log(`[P2P] Received action from ${peerId}:`, data.type);
 
             switch (data.type) {
                 case 'SYNC_REQ':
@@ -186,6 +195,12 @@ export function useP2P(roomId: string | null) {
                 case 'CURSOR_MOVE':
                     // Don't log cursor moves - too spammy
                     store.updateCursor(data.payload.userId, data.payload);
+                    break;
+
+                case 'CONFETTI':
+                    if (callbacksRef.current?.onConfetti) {
+                        callbacksRef.current.onConfetti(data.payload.x, data.payload.y);
+                    }
                     break;
             }
         });

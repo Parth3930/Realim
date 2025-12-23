@@ -32,6 +32,8 @@ export interface BoardElement {
     height?: number;
     rotation?: number;
     scale?: number;
+    font?: string;
+    fontWeight?: number;
     createdBy: string;
     createdAt?: number; // Timestamp for sorting/auto-scroll
     lastModifiedAt?: number; // Timestamp when element was last moved/modified

@@ -12,23 +12,26 @@ export interface HandData {
 
 interface GestureControllerProps {
     onHandsUpdate: (hands: HandData[]) => void;
+    onConfettiGesture?: (x: number, y: number) => void;
     enabled: boolean;
 }
 
-export function GestureController({ onHandsUpdate, enabled }: GestureControllerProps) {
+export function GestureController({ onHandsUpdate, onConfettiGesture, enabled }: GestureControllerProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const canvasRef = useRef<HTMLCanvasElement>(null); // Kept for resizing logic if needed, but drawing removed
+    const canvasRef = useRef<HTMLCanvasElement>(null);
     const [loaded, setLoaded] = useState(false);
 
-    // Refs for animation loop
     const handLandmarkerRef = useRef<HandLandmarker | null>(null);
     const requestRef = useRef<number>(0);
 
-    // Ref to always have latest callback - fixes stale closure in animation loop
     const onHandsUpdateRef = useRef(onHandsUpdate);
     onHandsUpdateRef.current = onHandsUpdate;
 
-    // ... (Init and cleanup same as before) ...
+    const onConfettiGestureRef = useRef(onConfettiGesture);
+    onConfettiGestureRef.current = onConfettiGesture;
+
+    const wasConfettiRef = useRef(false);
+
     useEffect(() => {
         const init = async () => {
             const vision = await FilesetResolver.forVisionTasks(
@@ -80,6 +83,10 @@ export function GestureController({ onHandsUpdate, enabled }: GestureControllerP
         return distTip < distPip;
     };
 
+    const lastConfettiTimeRef = useRef(0);
+    const pinchStateRef = useRef<Record<string, boolean>>({});
+    const cursorSmoothRef = useRef<Record<string, { x: number, y: number }>>({});
+
     const predict = () => {
         const video = videoRef.current;
         const landmarker = handLandmarkerRef.current;
@@ -91,41 +98,96 @@ export function GestureController({ onHandsUpdate, enabled }: GestureControllerP
 
         if (results.landmarks && results.landmarks.length > 0) {
             const hands: any[] = [];
+            let leftHand: any = null;
+            let rightHand: any = null;
 
             results.landmarks.forEach((landmarks, index) => {
-                // Interaction Logic
                 const indexTip = landmarks[8];
                 const thumbTip = landmarks[4];
-                const handedness = results.handedness[index][0].categoryName; // Left or Right logic
+                const handedness = results.handedness[index][0].categoryName;
 
-                // Cursor Position (Mirror X)
-                const cursorX = (1 - indexTip.x) * window.innerWidth;
-                const cursorY = indexTip.y * window.innerHeight;
-
-                // Pinch Detection
+                // --- 1. Pinch Hysteresis ---
+                // Calculate raw pinch distance
                 const distance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
-                const isPinching = distance < 0.05;
+                const wasPinching = pinchStateRef.current[handedness] || false;
 
-                // Fist Detection
+                // Hysteresis thresholds
+                const PINCH_ENTER = 0.04;
+                const PINCH_EXIT = 0.08;
+
+                let isPinching = wasPinching;
+                if (distance < PINCH_ENTER) isPinching = true;
+                else if (distance > PINCH_EXIT) isPinching = false;
+
+                pinchStateRef.current[handedness] = isPinching;
+
+                // --- 2. Cursor Position Smoothing ---
+                // Raw target position (Tip of Index)
+                const targetX = (1 - indexTip.x) * window.innerWidth;
+                const targetY = indexTip.y * window.innerHeight;
+
+                const prevPos = cursorSmoothRef.current[handedness] || { x: targetX, y: targetY };
+
+                // Smoothing factor: Lower = smoother but more lag (0.2 is a good balance)
+                const smoothX = prevPos.x * 0.7 + targetX * 0.3;
+                const smoothY = prevPos.y * 0.7 + targetY * 0.3;
+
+                cursorSmoothRef.current[handedness] = { x: smoothX, y: smoothY };
+
                 const indexDown = isFingerDown(landmarks, 8, 6);
                 const middleDown = isFingerDown(landmarks, 12, 10);
                 const ringDown = isFingerDown(landmarks, 16, 14);
                 const pinkyDown = isFingerDown(landmarks, 20, 18);
                 const isFist = indexDown && middleDown && ringDown && pinkyDown;
 
-                hands.push({
-                    x: cursorX,
-                    y: cursorY,
+                const handData = {
+                    x: smoothX,
+                    y: smoothY,
                     isPinching,
                     isFist,
                     landmarks,
                     handedness
-                });
+                };
+                hands.push(handData);
+
+                if (handedness === 'Left') leftHand = handData;
+                if (handedness === 'Right') rightHand = handData;
             });
 
             onHandsUpdateRef.current(hands);
+
+            // Confetti Gesture: Left Thumb+Right Thumb touching
+            if (leftHand && rightHand && onConfettiGestureRef.current) {
+                const lThumb = leftHand.landmarks[4];
+                const rThumb = rightHand.landmarks[4];
+
+                // Calculate distances (using normalized coords)
+                const thumbDist = Math.hypot(lThumb.x - rThumb.x, lThumb.y - rThumb.y);
+
+                const THRESHOLD = 0.08;
+
+                if (thumbDist < THRESHOLD) {
+                    const now = Date.now();
+                    // 3-second Rate Limit
+                    if (now - lastConfettiTimeRef.current > 3000) {
+                        // Trigger
+                        const mx = (lThumb.x + rThumb.x) / 2;
+                        const my = (lThumb.y + rThumb.y) / 2;
+                        // Mirror X for screen pos
+                        const sx = (1 - mx) * window.innerWidth;
+                        const sy = my * window.innerHeight;
+
+                        onConfettiGestureRef.current(sx, sy);
+                        lastConfettiTimeRef.current = now;
+                    }
+                }
+            }
+
         } else {
             onHandsUpdateRef.current([]);
+            // Clear smooth state if hands lost
+            cursorSmoothRef.current = {};
+            pinchStateRef.current = {};
         }
 
         requestRef.current = requestAnimationFrame(predict);
@@ -135,7 +197,6 @@ export function GestureController({ onHandsUpdate, enabled }: GestureControllerP
 
     return (
         <div className="fixed bottom-4 right-4 z-[9999] pointer-events-none opacity-0">
-            {/* Hidden Video Feed */}
             <video ref={videoRef} autoPlay playsInline className="hidden" />
         </div>
     );

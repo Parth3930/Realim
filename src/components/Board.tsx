@@ -1,3 +1,4 @@
+import confetti from 'canvas-confetti';
 import React, { useEffect, useState, useRef, memo } from 'react';
 import { useBoardStore, type ElementType, type BoardElement } from '../lib/store';
 import { useP2P } from '../lib/p2p';
@@ -30,11 +31,35 @@ interface BoardProps {
 
 export function Board({ roomId }: BoardProps) {
     const store = useBoardStore();
-    const { broadcast, accessDenied, retryJoin, isConnected } = useP2P(roomId);
-    const containerRef = useRef<HTMLDivElement>(null);
 
     // Viewport State (Infinite Canvas)
+    // Defined here so confetti handler can access it
     const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
+
+
+
+    const toScreen = (worldX: number, worldY: number) => {
+        return {
+            x: worldX * viewport.scale + viewport.x,
+            y: worldY * viewport.scale + viewport.y
+        };
+    };
+
+    const handleRemoteConfetti = (x: number, y: number) => {
+        const screen = toScreen(x, y);
+        confetti({
+            particleCount: 100,
+            spread: 70,
+            origin: { x: screen.x / window.innerWidth, y: screen.y / window.innerHeight },
+            zIndex: 9999
+        });
+    };
+
+    const { broadcast, accessDenied, retryJoin, isConnected } = useP2P(roomId, { onConfetti: handleRemoteConfetti });
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Initial Pan State
+
     const [isPanning, setIsPanning] = useState(false);
 
     // Refs for Gesture Logic (Stale Closure Prevention)
@@ -55,6 +80,8 @@ export function Board({ roomId }: BoardProps) {
         panVelocity: { x: number, y: number };
         pinchReleaseCounter: number;
         fistActiveCounter: number;
+        smoothedPos: { x: number, y: number } | null;
+        lastBroadcastTime: number;
     }>>({});
 
     const getHandRef = (handedness: string) => {
@@ -66,7 +93,9 @@ export function Board({ roomId }: BoardProps) {
                 grabStatus: null,
                 panVelocity: { x: 0, y: 0 },
                 pinchReleaseCounter: 0,
-                fistActiveCounter: 0
+                fistActiveCounter: 0,
+                smoothedPos: null,
+                lastBroadcastTime: 0
             };
         }
         return handRefs.current[handedness];
@@ -102,6 +131,19 @@ export function Board({ roomId }: BoardProps) {
     const [pendingTool, setPendingTool] = useState<ElementType | null>(null);
     const [pendingClick, setPendingClick] = useState<{ x: number, y: number } | null>(null);
     const [inputValue, setInputValue] = useState('');
+
+    // Inline Text State
+    const [inlineText, setInlineText] = useState<{ x: number, y: number, value: string, font: string } | null>(null);
+    const inlineInputRef = useRef<HTMLInputElement>(null);
+    const [selectedFont, setSelectedFont] = useState('Inter');
+
+    const FONT_OPTIONS = [
+        { name: 'Inter', value: 'Inter, sans-serif' },
+        { name: 'Mono', value: 'ui-monospace, monospace' },
+        { name: 'Serif', value: 'Georgia, serif' },
+        { name: 'Cursive', value: 'Pacifico, cursive' },
+        { name: 'Bold', value: 'Inter, sans-serif', weight: 700 },
+    ];
 
     // Persistence: Load
     useEffect(() => {
@@ -245,14 +287,38 @@ export function Board({ roomId }: BoardProps) {
         };
     };
 
-    const toScreen = (worldX: number, worldY: number) => {
-        return {
-            x: worldX * viewport.scale + viewport.x,
-            y: worldY * viewport.scale + viewport.y
-        };
-    };
+
 
     // --- Handlers ---
+
+    // Confetti Gesture Handler (Local)
+    const handleLocalConfettiGesture = (screenX: number, screenY: number) => {
+        // Trigger local visual
+        confetti({
+            particleCount: 100,
+            spread: 70,
+            origin: { x: screenX / window.innerWidth, y: screenY / window.innerHeight },
+            zIndex: 9999
+        });
+
+        // Broadcast to peers
+        const worldPos = toWorld(screenX, screenY);
+        broadcast({ type: 'CONFETTI', payload: worldPos });
+    };
+
+    // File Upload Handler
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                if (typeof ev.target?.result === 'string') {
+                    setInputValue(ev.target.result);
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+    };
 
     const handleDragUpdate = (id: string, newWorldX: number, newWorldY: number, final: boolean) => {
         const updates = { x: newWorldX, y: newWorldY, lastModifiedAt: Date.now() };
@@ -443,16 +509,56 @@ export function Board({ roomId }: BoardProps) {
     };
 
     const handleCanvasClick = (e: React.MouseEvent) => {
+        // If inline text is active, commit it first
+        if (inlineText && inlineText.value.trim()) {
+            commitInlineText();
+            return;
+        } else if (inlineText) {
+            setInlineText(null);
+        }
+
         if (activeTool === 'select' || activeTool === 'hand' || isPanning) return;
         if (!containerRef.current) return;
         const rect = containerRef.current.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
         const worldPos = toWorld(mouseX, mouseY);
+
+        // For text tool, use inline editing instead of modal
+        if (activeTool === 'text') {
+            setInlineText({ x: worldPos.x, y: worldPos.y, value: '', font: selectedFont });
+            setTimeout(() => inlineInputRef.current?.focus(), 0);
+            return;
+        }
+
         setPendingTool(activeTool);
         setPendingClick(worldPos);
         setInputValue('');
         setModalOpen(true);
+    };
+
+    const commitInlineText = () => {
+        if (!inlineText || !inlineText.value.trim()) {
+            setInlineText(null);
+            return;
+        }
+        const id = nanoid();
+        const fontOption = FONT_OPTIONS.find(f => f.name === inlineText.font) || FONT_OPTIONS[0];
+        const newElement: BoardElement = {
+            id,
+            type: 'text',
+            x: inlineText.x,
+            y: inlineText.y,
+            content: inlineText.value,
+            createdBy: store.userId,
+            createdAt: Date.now(),
+            font: fontOption.value,
+            fontWeight: fontOption.weight,
+        };
+        store.addElement(newElement);
+        broadcast({ type: 'ADD_ELEMENT', payload: newElement });
+        setInlineText(null);
+        setActiveTool('select');
     };
 
     const handleModalSubmit = () => {
@@ -501,7 +607,7 @@ export function Board({ roomId }: BoardProps) {
                     </DialogHeader>
                     <div className="py-4">
                         <Label className="mb-2 block text-muted-foreground">
-                            {pendingTool === 'image' ? 'Image Link' : 'Text'}
+                            {pendingTool === 'image' ? 'Image Link or Upload' : 'Text'}
                         </Label>
                         {pendingTool === 'text' || pendingTool === 'sticky' ? (
                             <textarea
@@ -512,12 +618,28 @@ export function Board({ roomId }: BoardProps) {
                                 autoFocus
                             />
                         ) : (
-                            <Input
-                                value={inputValue}
-                                onChange={(e) => setInputValue(e.target.value)}
-                                placeholder="https://..."
-                                autoFocus
-                            />
+                            <div className="space-y-3">
+                                <Input
+                                    value={inputValue}
+                                    onChange={(e) => setInputValue(e.target.value)}
+                                    placeholder="https://..."
+                                    autoFocus
+                                />
+                                <div className="relative">
+                                    <div className="absolute inset-0 flex items-center">
+                                        <span className="w-full border-t border-white/10" />
+                                    </div>
+                                    <div className="relative flex justify-center text-xs uppercase">
+                                        <span className="bg-[#0f0f11] px-2 text-muted-foreground">Or upload</span>
+                                    </div>
+                                </div>
+                                <Input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handleFileSelect}
+                                    className="cursor-pointer file:cursor-pointer file:text-foreground file:border-0 file:bg-transparent file:text-sm file:font-medium"
+                                />
+                            </div>
                         )}
                     </div>
                     <DialogFooter>
@@ -577,9 +699,30 @@ export function Board({ roomId }: BoardProps) {
                 )}
             </div>
 
+            {/* Text Font Options */}
+            {activeTool === 'text' && (
+                <div className="absolute top-16 sm:top-20 left-1/2 -translate-x-1/2 z-50 glass px-2 py-2 rounded-xl flex gap-1 shadow-xl border border-white/10">
+                    {FONT_OPTIONS.map((font) => (
+                        <button
+                            key={font.name}
+                            onClick={() => setSelectedFont(font.name)}
+                            className={cn(
+                                "px-3 py-1.5 rounded-lg text-sm transition-all",
+                                selectedFont === font.name
+                                    ? "bg-primary text-white"
+                                    : "hover:bg-white/10 text-muted-foreground hover:text-white"
+                            )}
+                            style={{ fontFamily: font.value, fontWeight: font.weight || 400 }}
+                        >
+                            {font.name}
+                        </button>
+                    ))}
+                </div>
+            )}
 
             <GestureController
                 enabled={gestureMode}
+                onConfettiGesture={handleLocalConfettiGesture}
                 onHandsUpdate={(hands) => {
                     const newCursors: (HandData & { grabStatus: 'grabbed' | 'miss' | null })[] = [];
                     const activeGrabs: { hand: string, elId: string, wX: number, wY: number, element: HTMLElement }[] = [];
@@ -588,9 +731,9 @@ export function Board({ roomId }: BoardProps) {
                         const refs = getHandRef(hand.handedness);
                         const { landmarks, isPinching, isFist } = hand;
 
-                        // Interaction Point Logic
-                        let interactionX = hand.x;
-                        let interactionY = hand.y;
+                        // Interaction Point Logic with smoothing
+                        let rawX = hand.x;
+                        let rawY = hand.y;
 
                         // Use Midpoint between Thumb (4) and Index (8)
                         if (landmarks && landmarks.length > 8) {
@@ -602,9 +745,17 @@ export function Board({ roomId }: BoardProps) {
                             const thumbScreenY = thumb.y * window.innerHeight;
                             const indexScreenY = index.y * window.innerHeight;
 
-                            interactionX = (thumbScreenX + indexScreenX) / 2;
-                            interactionY = (thumbScreenY + indexScreenY) / 2;
+                            rawX = (thumbScreenX + indexScreenX) / 2;
+                            rawY = (thumbScreenY + indexScreenY) / 2;
                         }
+
+                        // Apply smoothing to interaction point
+                        // Lower factor = smoother but more delay. 0.15 is very buttery.
+                        const SMOOTH_FACTOR = 0.15;
+                        const prev = refs.smoothedPos || { x: rawX, y: rawY };
+                        const interactionX = prev.x + (rawX - prev.x) * SMOOTH_FACTOR;
+                        const interactionY = prev.y + (rawY - prev.y) * SMOOTH_FACTOR;
+                        refs.smoothedPos = { x: interactionX, y: interactionY };
 
                         // Use ref for grab status
                         let currentGrabStatus = refs.grabStatus;
@@ -703,6 +854,9 @@ export function Board({ roomId }: BoardProps) {
                         }
 
                         refs.wasPinching = isPinching;
+
+                        // Force update currentGrabStatus if it changed during logic
+                        currentGrabStatus = refs.grabStatus;
 
                         // Hand Panning vs Grab
                         const canFistPan = isFist && !isPinching && !refs.grabbedEl && refs.grabStatus === null && refs.pinchReleaseCounter === 0;
@@ -879,14 +1033,19 @@ export function Board({ roomId }: BoardProps) {
 
                                     // Use fontSize for text, scale for others
                                     if (elData?.type === 'text') {
-                                        refs.grabbedEl.element.style.transform = `translate(${newX}px, ${newY}px) rotate(${rot}deg)`;
-                                        refs.grabbedEl.element.style.fontSize = `${18 * scl}px`;
+                                        refs.grabbedEl.element.style.transform = `translate3d(${newX}px, ${newY}px, 0) rotate(${rot}deg)`;
+                                        refs.grabbedEl.element.style.fontSize = `${20 * scl}px`;
                                     } else {
-                                        refs.grabbedEl.element.style.transform = `translate(${newX}px, ${newY}px) rotate(${rot}deg) scale(${scl})`;
+                                        refs.grabbedEl.element.style.transform = `translate3d(${newX}px, ${newY}px, 0) rotate(${rot}deg) scale(${scl})`;
                                     }
                                 }
 
                                 handleDragUpdate(g.elId, newX, newY, false);
+                                const now = Date.now();
+                                if (now - refs.lastBroadcastTime > 32) { // ~30fps broadcast
+                                    handleDragUpdate(g.elId, newX, newY, false);
+                                    refs.lastBroadcastTime = now;
+                                }
                             }
                         });
                     }
@@ -903,15 +1062,14 @@ export function Board({ roomId }: BoardProps) {
                     {/* Interaction Midpoint Indicator */}
                     <div
                         className={cn(
-                            "absolute w-3 h-3 rounded-full z-50",
+                            "absolute w-3 h-3 rounded-full z-50 transition-all duration-75 ease-out will-change-transform",
                             cursor.grabStatus === 'grabbed' ? "bg-green-400/70" :
                                 cursor.grabStatus === 'miss' ? "bg-red-400/70" :
                                     "bg-yellow-400/50"
                         )}
                         style={{
-                            left: cursor.x,
-                            top: cursor.y,
-                            transform: 'translate(-50%, -50%)'
+                            transform: `translate3d(${cursor.x - 6}px, ${cursor.y - 6}px, 0)`,
+                            backfaceVisibility: 'hidden'
                         }}
                     />
 
@@ -947,15 +1105,15 @@ export function Board({ roomId }: BoardProps) {
                                     key={i}
                                     style={{
                                         position: 'absolute',
-                                        left: screenX,
-                                        top: screenY,
                                         width: size,
                                         height: size,
                                         borderRadius: '50%',
                                         backgroundColor: bgColor,
                                         boxShadow: shadow,
-                                        transform: 'translate(-50%, -50%)',
-                                        pointerEvents: 'none'
+                                        transform: `translate3d(${screenX - size / 2}px, ${screenY - size / 2}px, 0)`,
+                                        pointerEvents: 'none',
+                                        willChange: 'transform',
+                                        backfaceVisibility: 'hidden'
                                     }}
                                 />
                             )
@@ -967,14 +1125,14 @@ export function Board({ roomId }: BoardProps) {
                                 key={i}
                                 style={{
                                     position: 'absolute',
-                                    left: screenX,
-                                    top: screenY,
                                     width: 6,
                                     height: 6,
                                     borderRadius: '50%',
                                     backgroundColor: 'rgba(255,255,255,0.4)',
-                                    transform: 'translate(-50%, -50%)',
-                                    pointerEvents: 'none'
+                                    transform: `translate3d(${screenX - 3}px, ${screenY - 3}px, 0)`,
+                                    pointerEvents: 'none',
+                                    willChange: 'transform',
+                                    backfaceVisibility: 'hidden'
                                 }}
                             />
                         )
@@ -993,9 +1151,10 @@ export function Board({ roomId }: BoardProps) {
                 onClick={handleCanvasClick}
             >
                 <div
-                    className="absolute top-0 left-0 w-full h-full origin-top-left will-change-transform"
+                    className="absolute top-0 left-0 w-full h-full origin-top-left will-change-transform transition-transform duration-[40ms] ease-linear"
                     style={{
-                        transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`
+                        transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0) scale(${viewport.scale})`,
+                        backfaceVisibility: 'hidden'
                     }}
                 >
                     <div className="absolute -top-[50000px] -left-[50000px] w-[100000px] h-[100000px] opacity-[0.05] pointer-events-none"
@@ -1017,6 +1176,39 @@ export function Board({ roomId }: BoardProps) {
                             />
                         ))}
                     </AnimatePresence>
+
+                    {/* Inline Text Input */}
+                    {inlineText && (
+                        <input
+                            ref={inlineInputRef}
+                            type="text"
+                            value={inlineText.value}
+                            onChange={(e) => setInlineText({ ...inlineText, value: e.target.value })}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    commitInlineText();
+                                } else if (e.key === 'Escape') {
+                                    setInlineText(null);
+                                    setActiveTool('select');
+                                }
+                            }}
+                            onBlur={() => {
+                                if (inlineText.value.trim()) {
+                                    commitInlineText();
+                                } else {
+                                    setInlineText(null);
+                                }
+                            }}
+                            className="absolute bg-transparent border-none outline-none text-white text-lg font-medium caret-primary min-w-[100px]"
+                            style={{
+                                left: inlineText.x,
+                                top: inlineText.y,
+                                transform: 'translateY(-50%)'
+                            }}
+                            placeholder="Type here..."
+                            autoFocus
+                        />
+                    )}
 
                     {/* Cursors */}
                     {Object.entries(store.cursors).map(([id, cursor]) => {
@@ -1167,8 +1359,12 @@ function DraggableElement({
                 data.type === 'image' && "p-0",
             )}
             style={{
-                transform: `translate(${data.x}px, ${data.y}px) rotate(${data.rotation || 0}deg)${data.type !== 'text' ? ` scale(${data.scale || 1})` : ''}`,
-                fontSize: data.type === 'text' ? `${18 * (data.scale || 1)}px` : undefined,
+                transform: `translate3d(${data.x}px, ${data.y}px, 0) rotate(${data.rotation || 0}deg)${data.type !== 'text' ? ` scale(${data.scale || 1})` : ''}`,
+                fontSize: data.type === 'text' ? `${20 * (data.scale || 1)}px` : undefined,
+                fontFamily: data.font || undefined,
+                fontWeight: data.fontWeight || undefined,
+                transition: isDragging.current ? 'none' : 'transform 0.1s cubic-bezier(0.2, 0.8, 0.2, 1)',
+                backfaceVisibility: 'hidden',
             }}
             onPointerDown={handlePointerDown}
         >
