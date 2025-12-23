@@ -1275,6 +1275,7 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
     const containerRef = useRef<HTMLDivElement>(null);
     const [localPlaying, setLocalPlaying] = useState(false);
     const [ytReady, setYtReady] = useState(false);
+    const [isLocalYTPlaying, setIsLocalYTPlaying] = useState(false);
     const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     const isLocal = data.content.startsWith('data:audio');
@@ -1358,8 +1359,9 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
                     }
                 },
                 onStateChange: (event: any) => {
-                    // When playing, start sync interval
+                    // Track local playing state
                     if (event.data === 1) { // Playing
+                        setIsLocalYTPlaying(true);
                         if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
                         syncIntervalRef.current = setInterval(() => {
                             if (playerRef.current && playerRef.current.getCurrentTime) {
@@ -1370,11 +1372,14 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
                                     lastSyncedAt: Date.now()
                                 });
                             }
-                        }, 2000); // Sync every 2 seconds for better responsiveness
+                        }, 2000);
                     } else if (event.data === 2) { // Paused
+                        setIsLocalYTPlaying(false);
                         if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
                         const currentTime = playerRef.current?.getCurrentTime?.() || 0;
                         onUpdate({ isPlaying: false, playbackTime: currentTime });
+                    } else if (event.data === 0 || event.data === -1) { // Ended or unstarted
+                        setIsLocalYTPlaying(false);
                     }
                 }
             }
@@ -1443,6 +1448,20 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
         setLocalPlaying(!localPlaying);
     };
 
+    // Manual sync function - called when user clicks "Join Playback"
+    const joinPlayback = () => {
+        if (!playerRef.current) return;
+        try {
+            const remoteTime = data.playbackTime || 0;
+            playerRef.current.seekTo(remoteTime, true);
+            playerRef.current.playVideo();
+        } catch (e) {
+            console.log('Failed to join playback', e);
+        }
+    };
+
+    // Check if we need to show sync button
+    const needsSync = isYouTube && data.isPlaying && !isLocalYTPlaying;
     const mediaType = isLocal ? '💾 Local Audio' : isYouTube ? '📺 YouTube Video' : 'Unknown';
 
     return (
@@ -1482,7 +1501,22 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
                         </div>
                     </>
                 ) : isYouTube ? (
-                    <div ref={containerRef} className="w-full h-full" />
+                    <div className="relative w-full h-full">
+                        <div ref={containerRef} className="w-full h-full" />
+                        {/* Sync Overlay - shows when remote is playing but local isn't */}
+                        {needsSync && (
+                            <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center z-10 backdrop-blur-sm">
+                                <button
+                                    onClick={joinPlayback}
+                                    className="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg font-medium flex items-center gap-2 shadow-xl transition-all hover:scale-105 active:scale-95"
+                                >
+                                    <Play size={18} fill="white" />
+                                    Join Playback
+                                </button>
+                                <span className="text-white/50 text-xs mt-2">Someone is playing</span>
+                            </div>
+                        )}
+                    </div>
                 ) : (
                     <div className="text-white/50 text-sm">Paste a YouTube link</div>
                 )}
