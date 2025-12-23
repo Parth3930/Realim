@@ -27,7 +27,7 @@ export interface BoardElement {
     type: ElementType;
     x: number;
     y: number;
-    content: string; // For music, this stores the Spotify Link
+    content: string; // For music, this stores the YouTube Link or audio data URL
     width?: number;
     height?: number;
     rotation?: number;

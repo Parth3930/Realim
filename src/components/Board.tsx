@@ -612,7 +612,7 @@ export function Board({ roomId }: BoardProps) {
                     </DialogHeader>
                     <div className="py-4">
                         <Label className="mb-2 block text-muted-foreground">
-                            {pendingTool === 'image' ? 'Image Link or Upload' : pendingTool === 'music' ? 'Spotify Song Link' : 'Text'}
+                            {pendingTool === 'image' ? 'Image Link or Upload' : pendingTool === 'music' ? 'YouTube Link or Upload Audio' : 'Text'}
                         </Label>
                         {pendingTool === 'text' || pendingTool === 'sticky' ? (
                             <textarea
@@ -627,8 +627,22 @@ export function Board({ roomId }: BoardProps) {
                                 <Input
                                     value={inputValue}
                                     onChange={(e) => setInputValue(e.target.value)}
-                                    placeholder="https://open.spotify.com/track/..."
+                                    placeholder="https://youtube.com/watch?v=..."
                                     autoFocus
+                                />
+                                <div className="relative">
+                                    <div className="absolute inset-0 flex items-center">
+                                        <span className="w-full border-t border-white/10" />
+                                    </div>
+                                    <div className="relative flex justify-center text-xs uppercase">
+                                        <span className="bg-[#0f0f11] px-2 text-muted-foreground">Or upload audio</span>
+                                    </div>
+                                </div>
+                                <Input
+                                    type="file"
+                                    accept="audio/*"
+                                    onChange={handleFileSelect}
+                                    className="cursor-pointer file:cursor-pointer file:text-foreground file:border-0 file:bg-transparent file:text-sm file:font-medium"
                                 />
                             </div>
                         ) : (
