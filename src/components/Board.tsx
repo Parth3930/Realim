@@ -1257,27 +1257,162 @@ export function Board({ roomId }: BoardProps) {
 function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdate: (updates: Partial<BoardElement>) => void }) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
+    const playerRef = useRef<any>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
     const [localPlaying, setLocalPlaying] = useState(false);
+    const [ytReady, setYtReady] = useState(false);
+    const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     const isLocal = data.content.startsWith('data:audio');
+
+    // Extract YouTube video ID
+    const getYouTubeId = (link: string) => {
+        if (!link.includes('youtube') && !link.includes('youtu.be')) return null;
+        try {
+            const url = new URL(link);
+            let id = url.searchParams.get('v');
+            if (!id && link.includes('youtu.be')) id = url.pathname.slice(1);
+            return id;
+        } catch {
+            return null;
+        }
+    };
+
+    const videoId = getYouTubeId(data.content);
+    const isYouTube = !!videoId;
+
+    // Load YouTube API
+    useEffect(() => {
+        if (!isYouTube) return;
+
+        // Load API script if not loaded
+        if (!(window as any).YT) {
+            const tag = document.createElement('script');
+            tag.src = 'https://www.youtube.com/iframe_api';
+            const firstScriptTag = document.getElementsByTagName('script')[0];
+            firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+        }
+
+        // Wait for API to be ready
+        const checkYT = () => {
+            if ((window as any).YT && (window as any).YT.Player) {
+                setYtReady(true);
+            } else {
+                setTimeout(checkYT, 100);
+            }
+        };
+        checkYT();
+    }, [isYouTube]);
+
+    // Create YouTube player when API is ready
+    useEffect(() => {
+        if (!ytReady || !containerRef.current || !videoId) return;
+
+        // Clear existing player
+        if (playerRef.current) {
+            try { playerRef.current.destroy(); } catch { }
+        }
+        containerRef.current.innerHTML = '';
+        const div = document.createElement('div');
+        div.id = `yt-player-${data.id}`;
+        containerRef.current.appendChild(div);
+
+        // Calculate start time from synced state
+        const startSeconds = Math.floor(data.playbackTime || 0);
+
+        playerRef.current = new (window as any).YT.Player(div.id, {
+            videoId: videoId,
+            width: '100%',
+            height: '100%',
+            playerVars: {
+                autoplay: 1,
+                start: startSeconds,
+                rel: 0,
+                modestbranding: 1,
+            },
+            events: {
+                onReady: (event: any) => {
+                    // Always seek to synced position and play for new joiners
+                    // Check current state from store via closure
+                    const currentState = data;
+                    event.target.seekTo(startSeconds, true);
+                    // Always auto-play for new joiners when there's playback time
+                    if (startSeconds > 0 || currentState.isPlaying) {
+                        event.target.playVideo();
+                    }
+                },
+                onStateChange: (event: any) => {
+                    // When playing, start sync interval
+                    if (event.data === 1) { // Playing
+                        if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+                        syncIntervalRef.current = setInterval(() => {
+                            if (playerRef.current && playerRef.current.getCurrentTime) {
+                                const currentTime = playerRef.current.getCurrentTime() || 0;
+                                onUpdate({
+                                    isPlaying: true,
+                                    playbackTime: currentTime,
+                                    lastSyncedAt: Date.now()
+                                });
+                            }
+                        }, 2000); // Sync every 2 seconds for better responsiveness
+                    } else if (event.data === 2) { // Paused
+                        if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+                        const currentTime = playerRef.current?.getCurrentTime?.() || 0;
+                        onUpdate({ isPlaying: false, playbackTime: currentTime });
+                    }
+                }
+            }
+        });
+
+        return () => {
+            if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+        };
+    }, [ytReady, videoId, data.id]);
+
+    // Sync playback from remote state
+    useEffect(() => {
+        if (!playerRef.current || !isYouTube) return;
+
+        const player = playerRef.current;
+        if (!player.getPlayerState) return; // Not ready yet
+
+        try {
+            const playerState = player.getPlayerState();
+            const currentTime = player.getCurrentTime?.() || 0;
+            const remoteTime = data.playbackTime || 0;
+
+            // If remote is playing but we're not playing, play and seek
+            if (data.isPlaying && playerState !== 1) {
+                player.seekTo(remoteTime, true);
+                player.playVideo();
+            }
+            // If remote is paused but we're playing, pause
+            else if (!data.isPlaying && playerState === 1) {
+                player.pauseVideo();
+            }
+            // If time drifted more than 3 seconds while playing, resync
+            else if (data.isPlaying && Math.abs(currentTime - remoteTime) > 3) {
+                player.seekTo(remoteTime, true);
+            }
+        } catch (e) {
+            // Player not ready yet
+        }
+    }, [data.isPlaying, data.playbackTime, ytReady]);
 
     // Handle File Upload
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        // Check size (limit to 15MB for browser perf/sync)
         if (file.size > 15 * 1024 * 1024) {
-            alert("File too large! keep it under 15MB for board performance.");
+            alert("File too large! Keep it under 15MB.");
             return;
         }
 
         const reader = new FileReader();
         reader.onload = (ev) => {
             const result = ev.target?.result as string;
-            if (result) {
-                onUpdate({ content: result });
-            }
+            if (result) onUpdate({ content: result });
         };
         reader.readAsDataURL(file);
     };
@@ -1292,59 +1427,7 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
         setLocalPlaying(!localPlaying);
     };
 
-    // Determine Embed URL and Type (for non-local)
-    const getEmbedInfo = (link: string) => {
-        if (link.startsWith('data:audio')) return { url: '', type: '💾 Local Audio' };
-
-        try {
-            // Check for YouTube
-            if (link.includes('youtube.com') || link.includes('youtu.be')) {
-                const url = new URL(link);
-                let id = url.searchParams.get('v');
-                if (!id && link.includes('youtu.be')) id = url.pathname.slice(1);
-                const list = url.searchParams.get('list');
-
-                if (list) return { url: `https://www.youtube.com/embed/videoseries?list=${list}`, type: '📺 YouTube Playlist' };
-                if (id) return { url: `https://www.youtube.com/embed/${id}`, type: '📺 YouTube Video' };
-            }
-        } catch { }
-
-        // Default: Spotify Logic
-        const getSpotifyUri = (l: string) => {
-            try {
-                if (l.startsWith('spotify:')) return l;
-                const url = new URL(l);
-                const pathParts = url.pathname.split('/').filter(Boolean);
-                const type = pathParts[0];
-                const id = pathParts[1]?.split('?')[0];
-                if (!id) {
-                    const lastPart = pathParts[pathParts.length - 1]?.split('?')[0];
-                    return `spotify:track:${lastPart}`;
-                }
-                const supportedTypes = ['track', 'playlist', 'album', 'episode', 'show'];
-                if (supportedTypes.includes(type)) return `spotify:${type}:${id}`;
-                return `spotify:track:${id}`;
-            } catch {
-                const parts = l.split('/');
-                const id = parts[parts.length - 1]?.split('?')[0];
-                return `spotify:track:${id}`;
-            }
-        };
-
-        const uri = getSpotifyUri(link);
-        const parts = uri.split(':');
-        if (parts.length >= 3) {
-            const type = parts[1];
-            const id = parts[2];
-            return {
-                url: `https://open.spotify.com/embed/${type}/${id}?utm_source=generator&theme=0`,
-                type: type === 'playlist' ? '🎵 Spotify Playlist' : type === 'album' ? '💿 Spotify Album' : '🎧 Spotify Track'
-            };
-        }
-        return { url: link, type: 'Unknown' };
-    };
-
-    const { url: embedUrl, type: mediaType } = getEmbedInfo(data.content);
+    const mediaType = isLocal ? '💾 Local Audio' : isYouTube ? '📺 YouTube Video' : 'Unknown';
 
     return (
         <div className="w-[320px] h-[240px] bg-violet-950 rounded-xl flex flex-col overflow-hidden shadow-2xl border border-white/10 group/music cursor-auto relative" onPointerDown={(e) => e.stopPropagation()}>
@@ -1372,27 +1455,20 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
                         <div className={cn("transition-all duration-1000", localPlaying ? "animate-[spin_3s_linear_infinite]" : "")}>
                             <svg viewBox="0 0 32 32" className="w-32 h-32 drop-shadow-2xl" shapeRendering="crispEdges">
                                 <circle cx="16" cy="16" r="15" fill="#111" />
-                                <circle cx="16" cy="16" r="14" fill="#050505" /> {/* Groove */}
-                                <circle cx="16" cy="16" r="12" fill="#111" /> {/* Groove */}
-                                <circle cx="16" cy="16" r="10" fill="#050505" /> {/* Groove */}
-                                <circle cx="16" cy="16" r="6" fill="#8b5cf6" />  {/* Label */}
-                                <circle cx="16" cy="16" r="2" fill="#000" />     {/* Hole */}
-                                {/* Pixel Glints */}
+                                <circle cx="16" cy="16" r="14" fill="#050505" />
+                                <circle cx="16" cy="16" r="12" fill="#111" />
+                                <circle cx="16" cy="16" r="10" fill="#050505" />
+                                <circle cx="16" cy="16" r="6" fill="#8b5cf6" />
+                                <circle cx="16" cy="16" r="2" fill="#000" />
                                 <rect x="14" y="2" width="2" height="2" fill="#fff" fillOpacity="0.3" />
                                 <rect x="25" y="10" width="2" height="2" fill="#fff" fillOpacity="0.2" />
                             </svg>
                         </div>
                     </>
+                ) : isYouTube ? (
+                    <div ref={containerRef} className="w-full h-full" />
                 ) : (
-                    <iframe
-                        src={embedUrl}
-                        width="100%"
-                        height="100%"
-                        frameBorder="0"
-                        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                        loading="lazy"
-                        className="rounded-t-xl"
-                    />
+                    <div className="text-white/50 text-sm">Paste a YouTube link</div>
                 )}
             </div>
 
@@ -1415,7 +1491,7 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
                     <div className="flex flex-col flex-1 min-w-0">
                         <span className="text-white/60 text-[10px] truncate">{mediaType}</span>
                         <span className="text-white/40 text-[9px]">
-                            {mediaType.includes('YouTube') ? 'Full playback enabled' : 'Log in for full songs'}
+                            {mediaType.includes('YouTube') ? 'Synced playback' : 'Paste YouTube link'}
                         </span>
                     </div>
                 )}
@@ -1435,10 +1511,9 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
-                            const instructions = "Enter a Link:\n• Spotify (Track/Playlist/Album)\n• YouTube (Video/Playlist)";
-                            const newLink = prompt(instructions, data.content.startsWith('data:') ? '' : data.content);
+                            const newLink = prompt("Enter YouTube Link (Video or Playlist):", data.content.startsWith('data:') ? '' : data.content);
                             if (newLink) {
-                                onUpdate({ content: newLink });
+                                onUpdate({ content: newLink, playbackTime: 0 });
                             }
                         }}
                         className="p-2 text-white/70 hover:text-white transition-colors hover:bg-white/10 rounded-lg shrink-0"
