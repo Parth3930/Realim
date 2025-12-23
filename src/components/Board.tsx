@@ -1252,47 +1252,64 @@ export function Board({ roomId }: BoardProps) {
 
 // --- Music Element ---
 function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdate: (updates: Partial<BoardElement>) => void }) {
-    // Robust URI extraction - supports track, playlist, album, episode
-    const getSpotifyUri = (link: string) => {
-        try {
-            if (link.startsWith('spotify:')) return link;
-            const url = new URL(link);
-            const pathParts = url.pathname.split('/').filter(Boolean);
-            const type = pathParts[0];
-            const id = pathParts[1]?.split('?')[0];
-            if (!id) {
-                const lastPart = pathParts[pathParts.length - 1]?.split('?')[0];
-                return `spotify:track:${lastPart}`;
-            }
-            const supportedTypes = ['track', 'playlist', 'album', 'episode', 'show'];
-            if (supportedTypes.includes(type)) {
-                return `spotify:${type}:${id}`;
-            }
-            return `spotify:track:${id}`;
-        } catch {
-            const parts = link.split('/');
-            const id = parts[parts.length - 1]?.split('?')[0];
-            return `spotify:track:${id}`;
-        }
-    };
 
-    // Convert URI to embed URL
-    const getEmbedUrl = (link: string) => {
+    // Determine Embed URL and Type
+    const getEmbedInfo = (link: string) => {
+        try {
+            // Check for YouTube
+            if (link.includes('youtube.com') || link.includes('youtu.be')) {
+                const url = new URL(link);
+                let id = url.searchParams.get('v');
+                if (!id && link.includes('youtu.be')) {
+                    id = url.pathname.slice(1);
+                }
+                const list = url.searchParams.get('list');
+
+                if (list) return { url: `https://www.youtube.com/embed/videoseries?list=${list}`, type: '📺 YouTube Playlist' };
+                if (id) return { url: `https://www.youtube.com/embed/${id}`, type: '📺 YouTube Video' };
+            }
+        } catch { }
+
+        // Default: Spotify Logic
+        const getSpotifyUri = (l: string) => {
+            try {
+                if (l.startsWith('spotify:')) return l;
+                const url = new URL(l);
+                const pathParts = url.pathname.split('/').filter(Boolean);
+                const type = pathParts[0];
+                const id = pathParts[1]?.split('?')[0];
+                if (!id) {
+                    const lastPart = pathParts[pathParts.length - 1]?.split('?')[0];
+                    return `spotify:track:${lastPart}`;
+                }
+                const supportedTypes = ['track', 'playlist', 'album', 'episode', 'show'];
+                if (supportedTypes.includes(type)) return `spotify:${type}:${id}`;
+                return `spotify:track:${id}`;
+            } catch {
+                const parts = l.split('/');
+                const id = parts[parts.length - 1]?.split('?')[0];
+                return `spotify:track:${id}`;
+            }
+        };
+
         const uri = getSpotifyUri(link);
         const parts = uri.split(':');
         if (parts.length >= 3) {
             const type = parts[1];
             const id = parts[2];
-            return `https://open.spotify.com/embed/${type}/${id}?utm_source=generator&theme=0`;
+            return {
+                url: `https://open.spotify.com/embed/${type}/${id}?utm_source=generator&theme=0`,
+                type: type === 'playlist' ? '🎵 Spotify Playlist' : type === 'album' ? '💿 Spotify Album' : '🎧 Spotify Track'
+            };
         }
-        return link;
+        return { url: link, type: 'Unknown' };
     };
 
-    const embedUrl = getEmbedUrl(data.content);
+    const { url: embedUrl, type: mediaType } = getEmbedInfo(data.content);
 
     return (
         <div className="w-[300px] h-[380px] bg-violet-950 rounded-xl flex flex-col overflow-hidden shadow-2xl border border-white/10 group/music cursor-auto" onPointerDown={(e) => e.stopPropagation()}>
-            {/* Spotify Embed - Full playback for logged-in users */}
+            {/* Embed Container */}
             <div className="flex-1 relative bg-black/50 rounded-t-xl overflow-hidden">
                 <iframe
                     src={embedUrl}
@@ -1305,24 +1322,26 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
                 />
             </div>
 
-            {/* Footer with login hint and change link button */}
+            {/* Footer */}
             <div className="h-[50px] bg-black/60 backdrop-blur-md px-3 flex items-center justify-between gap-2">
                 <div className="flex flex-col flex-1 min-w-0">
-                    <span className="text-white/60 text-[10px] truncate">
-                        {data.content.includes('playlist') ? '🎵 Playlist' : data.content.includes('album') ? '💿 Album' : '🎧 Track'}
+                    <span className="text-white/60 text-[10px] truncate">{mediaType}</span>
+                    <span className="text-white/40 text-[9px]">
+                        {mediaType.includes('YouTube') ? 'Full playback enabled' : 'Log in for full songs'}
                     </span>
-                    <span className="text-white/40 text-[9px]">Click play → Log in for full songs</span>
                 </div>
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
-                        const newLink = prompt("Enter Spotify Link (track, playlist, or album):", data.content);
+                        // Prompt user
+                        const instructions = "Enter a Link:\n• Spotify (Track/Playlist/Album)\n• YouTube (Video/Playlist)";
+                        const newLink = prompt(instructions, data.content);
                         if (newLink && newLink !== data.content) {
                             onUpdate({ content: newLink });
                         }
                     }}
                     className="p-2 text-white/70 hover:text-white transition-colors hover:bg-white/10 rounded-lg shrink-0"
-                    title="Change music"
+                    title="Change music source"
                 >
                     <Link2 size={16} />
                 </button>
