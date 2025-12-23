@@ -1308,7 +1308,7 @@ function MusicElementComponent({ data, onUpdate }: { data: BoardElement, onUpdat
     const { url: embedUrl, type: mediaType } = getEmbedInfo(data.content);
 
     return (
-        <div className="w-[300px] h-[380px] bg-violet-950 rounded-xl flex flex-col overflow-hidden shadow-2xl border border-white/10 group/music cursor-auto" onPointerDown={(e) => e.stopPropagation()}>
+        <div className="w-[320px] h-[240px] bg-violet-950 rounded-xl flex flex-col overflow-hidden shadow-2xl border border-white/10 group/music cursor-auto" onPointerDown={(e) => e.stopPropagation()}>
             {/* Embed Container */}
             <div className="flex-1 relative bg-black/50 rounded-t-xl overflow-hidden">
                 <iframe
