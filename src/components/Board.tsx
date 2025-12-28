@@ -1,3 +1,4 @@
+
 import confetti from 'canvas-confetti';
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useBoardStore, type ElementType, type BoardElement } from '../lib/store';
@@ -17,6 +18,8 @@ import { MemoizedDraggableElement } from './board/DraggableElement';
 import { Cursors } from './board/Cursors';
 import { GestureOverlay } from './board/GestureOverlay';
 import { useGestureLogic } from './board/useGestureLogic';
+import { Character } from './board/Character';
+import { CharacterController } from './board/CharacterController';
 
 // Debounce helper
 const debounce = (func: Function, wait: number) => {
@@ -56,6 +59,25 @@ export function Board({ roomId }: BoardProps) {
         const current = viewportRef.current;
         const next = typeof updaterOrValue === 'function' ? updaterOrValue(current) : updaterOrValue;
 
+        // Clamp Viewport to Grid Bounds (World [-2000, 2000])
+        if (containerRef.current) {
+            const { width, height } = containerRef.current.getBoundingClientRect();
+            const halfW = 2000 * next.scale;
+            const halfH = 2000 * next.scale;
+
+            if (width > halfW * 2) {
+                next.x = width / 2;
+            } else {
+                next.x = Math.min(Math.max(next.x, width - halfW), halfW);
+            }
+
+            if (height > halfH * 2) {
+                next.y = height / 2;
+            } else {
+                next.y = Math.min(Math.max(next.y, height - halfH), halfH);
+            }
+        }
+
         // Update Ref (Source of truth for interactions)
         viewportRef.current = next;
 
@@ -74,8 +96,11 @@ export function Board({ roomId }: BoardProps) {
     };
 
     // Tools & Mode
-    const [activeTool, setActiveTool] = useState<ElementType | 'select' | 'hand' | 'pen' | 'path'>('select');
+    const [activeTool, setActiveTool] = useState<ElementType | 'select' | 'hand' | 'pen' | 'path' | 'character'>('select');
     const [gestureMode, setGestureMode] = useState(false);
+
+    // Character Picker
+    const [selectedCharType, setSelectedCharType] = useState(0);
 
     // Dialogs
     const [modalOpen, setModalOpen] = useState(false);
@@ -90,9 +115,11 @@ export function Board({ roomId }: BoardProps) {
     // Pan State
     const [isPanning, setIsPanning] = useState(false);
 
-    // Pen State
+    // Draw State
+    const [strokeColor, setStrokeColor] = useState('#ffffff');
+    const [strokeWidth, setStrokeWidth] = useState(4);
+    const currentDrawingId = useRef<string | null>(null);
     const currentPathPoints = useRef<{ x: number, y: number }[]>([]);
-    const tempPathRef = useRef<SVGPathElement>(null);
     const isDrawing = useRef(false);
 
     // Coordinates
@@ -187,7 +214,7 @@ export function Board({ roomId }: BoardProps) {
         return () => clearTimeout(timer);
     }, [store.elements, roomId]);
 
-    // Auto-center on latest element when joining/loading
+    // Auto-center on latest element
     const hasAutoCenteredRef = useRef(false);
     const lastElementCountRef = useRef(0);
 
@@ -231,7 +258,6 @@ export function Board({ roomId }: BoardProps) {
 
                 updateVisualViewport(newV, true); // Commit immediately
                 hasAutoCenteredRef.current = true;
-                console.log('[Board] Auto-centered on element:', latest.id);
             }
 
             lastElementCountRef.current = allElements.length;
@@ -252,22 +278,17 @@ export function Board({ roomId }: BoardProps) {
                 const delta = -e.deltaY * zoomSensitivity;
 
                 updateVisualViewport((prev: any) => {
-                    const newScale = Math.min(Math.max(prev.scale + delta, 0.5), 5);
+                    const newScale = Math.min(Math.max(prev.scale + delta, 0.5), 2);
                     return { ...prev, scale: newScale };
                 });
-
-                // Commit debounced for state sync (render handles correctly)
                 commitViewport(viewportRef.current);
-
             } else {
                 const zoomSensitivity = 0.001;
                 const delta = -e.deltaY * zoomSensitivity;
 
                 updateVisualViewport((prev: any) => {
-                    const newScale = Math.min(Math.max(prev.scale + delta, 0.5), 5);
+                    const newScale = Math.min(Math.max(prev.scale + delta, 0.5), 2);
                     const rect = container.getBoundingClientRect();
-                    // Note: This rect reads might be forced layout but onWheel is high freq anyway.
-                    // Better to use viewportRef logic if possible, but mouse relative zoom needs mouse position.
                     const mouseX = e.clientX - rect.left;
                     const mouseY = e.clientY - rect.top;
                     const worldX = (mouseX - prev.x) / prev.scale;
@@ -278,15 +299,93 @@ export function Board({ roomId }: BoardProps) {
                         scale: newScale
                     };
                 });
-                // Commit debounced for state sync (render handles correctly)
                 commitViewport(viewportRef.current);
             }
         };
         container.addEventListener('wheel', onWheel, { passive: false });
-        // NOTE: We do NOT remove event listener here because strict mode might remove/add rapidly.
-        // Actually we MUST remove it to avoid leaks.
         return () => container.removeEventListener('wheel', onWheel);
     }, [commitViewport]);
+
+    // Keyboard Navigation (Smooth w/ Inertia)
+    const activeKeys = useRef<Set<string>>(new Set());
+    const keyVelocity = useRef({ x: 0, y: 0 });
+    const keyRafId = useRef<number | null>(null);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (activeTool === 'text' || inlineText || modalOpen) return;
+            if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                e.preventDefault();
+                activeKeys.current.add(e.key);
+                startKeyLoop();
+            }
+        };
+
+        const handleKeyUp = (e: KeyboardEvent) => {
+            activeKeys.current.delete(e.key);
+        };
+
+        const startKeyLoop = () => {
+            if (keyRafId.current) return;
+
+            const update = () => {
+                const keys = activeKeys.current;
+                const v = keyVelocity.current;
+                const ACCEL = 1.0;
+                const FRICTION = 0.85;
+                const MAX_SPEED = 15;
+
+                let targetDx = 0;
+                let targetDy = 0;
+
+                if (keys.has('ArrowUp')) targetDy += ACCEL;
+                if (keys.has('ArrowDown')) targetDy -= ACCEL;
+                if (keys.has('ArrowLeft')) targetDx += ACCEL;
+                if (keys.has('ArrowRight')) targetDx -= ACCEL;
+
+                if (targetDx !== 0) {
+                    v.x += targetDx;
+                    v.x = Math.min(Math.max(v.x, -MAX_SPEED), MAX_SPEED);
+                } else {
+                    v.x *= FRICTION;
+                    if (Math.abs(v.x) < 0.1) v.x = 0;
+                }
+
+                if (targetDy !== 0) {
+                    v.y += targetDy;
+                    v.y = Math.min(Math.max(v.y, -MAX_SPEED), MAX_SPEED);
+                } else {
+                    v.y *= FRICTION;
+                    if (Math.abs(v.y) < 0.1) v.y = 0;
+                }
+
+                if (v.x === 0 && v.y === 0 && keys.size === 0) {
+                    keyRafId.current = null;
+                    return;
+                }
+
+                updateVisualViewport((prev: any) => ({
+                    ...prev,
+                    x: prev.x + v.x,
+                    y: prev.y + v.y
+                }));
+                commitViewport(viewportRef.current);
+
+                keyRafId.current = requestAnimationFrame(update);
+            };
+            keyRafId.current = requestAnimationFrame(update);
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+            if (keyRafId.current) cancelAnimationFrame(keyRafId.current);
+        };
+    }, [activeTool, inlineText, modalOpen, commitViewport]);
 
     // Pointer Handlers
     const handlePointerDown = (e: React.PointerEvent) => {
@@ -295,9 +394,8 @@ export function Board({ roomId }: BoardProps) {
             setIsPanning(true);
             const startX = e.clientX;
             const startY = e.clientY;
-            const initialView = { ...viewportRef.current }; // Read from REF
+            const initialView = { ...viewportRef.current };
             const onPointerMove = (ev: PointerEvent) => {
-                // FAST DOM UPDATE
                 const dx = ev.clientX - startX;
                 const dy = ev.clientY - startY;
                 updateVisualViewport({ ...initialView, x: initialView.x + dx, y: initialView.y + dy });
@@ -306,8 +404,6 @@ export function Board({ roomId }: BoardProps) {
                 setIsPanning(false);
                 window.removeEventListener('pointermove', onPointerMove);
                 window.removeEventListener('pointerup', onPointerUp);
-
-                // Commit final state
                 setViewport(viewportRef.current);
             };
             window.addEventListener('pointermove', onPointerMove);
@@ -315,39 +411,115 @@ export function Board({ roomId }: BoardProps) {
         } else if (activeTool === 'path') {
             e.preventDefault();
             e.stopPropagation();
-            const target = e.currentTarget as Element;
-            target.setPointerCapture(e.pointerId);
 
             isDrawing.current = true;
             const rect = containerRef.current!.getBoundingClientRect();
-            const worldPos = toWorld(e.clientX - rect.left, e.clientY - rect.top);
+            const startWorldPos = toWorld(e.clientX - rect.left, e.clientY - rect.top);
 
-            // Start Path
-            currentPathPoints.current = [worldPos];
-            if (tempPathRef.current) {
-                tempPathRef.current.setAttribute('d', `M ${worldPos.x} ${worldPos.y}`);
-                tempPathRef.current.style.display = 'block';
-            }
+            const id = nanoid();
+            currentDrawingId.current = id;
+            currentPathPoints.current = [{ x: 0, y: 0 }];
+
+            const newElement: BoardElement = {
+                id,
+                type: 'path',
+                x: startWorldPos.x,
+                y: startWorldPos.y,
+                width: 1,
+                height: 1,
+                content: 'Path',
+                points: [{ x: 0, y: 0 }],
+                strokeColor,
+                strokeWidth,
+                createdBy: store.userId,
+                createdAt: Date.now(),
+                lastModifiedAt: Date.now()
+            };
+
+            store.addElement(newElement);
+            broadcast({ type: 'ADD_ELEMENT', payload: newElement });
+
+            const throttledBroadcast = debounce((pts: any[]) => {
+                broadcast({
+                    type: 'UPDATE_ELEMENT',
+                    payload: {
+                        id,
+                        updates: { points: pts, lastModifiedAt: Date.now() }
+                    }
+                });
+            }, 32);
+
+            const onMove = (ev: PointerEvent) => {
+                if (!isDrawing.current || !currentDrawingId.current) return;
+                const r = containerRef.current!.getBoundingClientRect();
+                const wp = toWorld(ev.clientX - r.left, ev.clientY - r.top);
+
+                const relPoint = {
+                    x: wp.x - startWorldPos.x,
+                    y: wp.y - startWorldPos.y
+                };
+
+                currentPathPoints.current.push(relPoint);
+                const updatedPoints = [...currentPathPoints.current];
+
+                store.updateElement(currentDrawingId.current, {
+                    points: updatedPoints,
+                    lastModifiedAt: Date.now()
+                });
+
+                throttledBroadcast(updatedPoints);
+            };
+
+            const onUp = () => {
+                if (isDrawing.current) {
+                    isDrawing.current = false;
+                    window.removeEventListener('pointermove', onMove);
+                    window.removeEventListener('pointerup', onUp);
+
+                    // Final sync to confirm all points are correct
+                    if (currentDrawingId.current) {
+                        const pts = [...currentPathPoints.current];
+
+                        // Calculate final bounds for collision optimization
+                        let minX = 0, minY = 0, maxX = 0, maxY = 0;
+                        pts.forEach(p => {
+                            minX = Math.min(minX, p.x);
+                            minY = Math.min(minY, p.y);
+                            maxX = Math.max(maxX, p.x);
+                            maxY = Math.max(maxY, p.y);
+                        });
+
+                        const finalUpdates = {
+                            points: pts,
+                            width: Math.max(maxX - minX, 20), // Minimum size for visibility
+                            height: Math.max(maxY - minY, 20),
+                            lastModifiedAt: Date.now()
+                        };
+
+                        store.updateElement(currentDrawingId.current, finalUpdates);
+                        broadcast({
+                            type: 'UPDATE_ELEMENT',
+                            payload: { id: currentDrawingId.current, updates: finalUpdates }
+                        });
+                    }
+
+                    currentDrawingId.current = null;
+                    currentPathPoints.current = [];
+                }
+            };
+
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
         }
     };
 
     const lastCursorUpdate = useRef(0);
-    const handleMouseMove = (e: React.MouseEvent) => {
-        if (!containerRef.current) return;
+    const handlePointerMove = (e: React.PointerEvent) => {
+        if (!containerRef.current || isDrawing.current) return;
         const rect = containerRef.current.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
         const worldPos = toWorld(mouseX, mouseY);
-
-        // Drawing Logic
-        if (isDrawing.current && activeTool === 'path') {
-            currentPathPoints.current.push(worldPos);
-            if (tempPathRef.current) {
-                const d = tempPathRef.current.getAttribute('d') || '';
-                tempPathRef.current.setAttribute('d', d + ` L ${worldPos.x} ${worldPos.y}`);
-            }
-            return;
-        }
 
         const now = Date.now();
         if (now - lastCursorUpdate.current > 16) {
@@ -365,82 +537,8 @@ export function Board({ roomId }: BoardProps) {
         }
     };
 
-    const handlePointerUp = (e: React.PointerEvent) => {
-        if (isDrawing.current) {
-            isDrawing.current = false;
-            e.currentTarget.releasePointerCapture(e.pointerId);
-
-            if (currentPathPoints.current.length > 2) {
-                // Finalize Path
-                const points = currentPathPoints.current;
-
-                // Calculate bounding box for normalization
-                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-                points.forEach(p => {
-                    if (p.x < minX) minX = p.x;
-                    if (p.y < minY) minY = p.y;
-                    if (p.x > maxX) maxX = p.x;
-                    if (p.y > maxY) maxY = p.y;
-                });
-
-                const width = maxX - minX;
-                const height = maxY - minY;
-
-                // Normalize points relative to minX, minY
-                const relativePoints = points.map(p => ({ x: p.x - minX, y: p.y - minY }));
-
-                const id = nanoid();
-                const newElement: BoardElement = {
-                    id,
-                    type: 'path',
-                    x: minX,
-                    y: minY,
-                    width,
-                    height,
-                    content: 'Path',
-                    points: relativePoints,
-                    strokeColor: '#fff',
-                    strokeWidth: 4,
-                    createdBy: store.userId,
-                    createdAt: Date.now(),
-                };
-
-                store.addElement(newElement);
-                broadcast({ type: 'ADD_ELEMENT', payload: newElement });
-            }
-
-            currentPathPoints.current = [];
-            if (tempPathRef.current) {
-                tempPathRef.current.setAttribute('d', '');
-                tempPathRef.current.style.display = 'none';
-            }
-        }
-    };
-
-    const handleCanvasClick = (e: React.MouseEvent) => {
-        if (inlineText && inlineText.value.trim()) {
-            commitInlineText();
-            return;
-        } else if (inlineText) {
-            setInlineText(null);
-        }
-        if (activeTool === 'select' || activeTool === 'hand' || isPanning || activeTool === 'path' || isDrawing.current) return;
-        if (!containerRef.current) return;
-
-        const rect = containerRef.current.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-        const worldPos = toWorld(mouseX, mouseY);
-
-        if (activeTool === 'text') {
-            setInlineText({ x: worldPos.x, y: worldPos.y, value: '', font: selectedFont });
-            setTimeout(() => inlineInputRef.current?.focus(), 0);
-            return;
-        }
-
-        setPendingTool(activeTool as ElementType);
-        setPendingClick(worldPos);
-        setModalOpen(true);
+    const handlePointerUp = (_e: React.PointerEvent) => {
+        // Handled by window listeners for active tools like 'path'
     };
 
     const commitInlineText = () => {
@@ -465,6 +563,63 @@ export function Board({ roomId }: BoardProps) {
         broadcast({ type: 'ADD_ELEMENT', payload: newElement });
         setInlineText(null);
         setActiveTool('select');
+    };
+
+    const handleCanvasClick = (e: React.MouseEvent) => {
+        if (inlineText && inlineText.value.trim()) {
+            commitInlineText();
+            return;
+        } else if (inlineText) {
+            setInlineText(null);
+        }
+        if (activeTool === 'select' || activeTool === 'hand' || isPanning || activeTool === 'path' || isDrawing.current) return;
+        if (!containerRef.current) return;
+
+        const rect = containerRef.current.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const worldPos = toWorld(mouseX, mouseY);
+
+        if (activeTool === 'text') {
+            setInlineText({ x: worldPos.x, y: worldPos.y, value: '', font: selectedFont });
+            setTimeout(() => inlineInputRef.current?.focus(), 0);
+            return;
+        }
+
+        // Spawn Character
+        if (activeTool === 'character') {
+            const id = nanoid();
+            const existing = Object.values(store.elements).find(el => el.type === 'character' && el.playerId === store.userId);
+            if (existing) {
+                store.deleteElement(existing.id);
+                broadcast({ type: 'DELETE_ELEMENT', payload: { id: existing.id } });
+            }
+
+            const newElement: BoardElement = {
+                id,
+                type: 'character',
+                x: worldPos.x - 20,
+                y: worldPos.y - 40,
+                content: 'Player',
+                createdBy: store.userId,
+                createdAt: Date.now(),
+                charType: selectedCharType,
+                playerId: store.userId,
+                respawnX: worldPos.x - 20,
+                respawnY: worldPos.y - 40,
+                vx: 0,
+                vy: 0,
+                isGrounded: true
+            };
+            store.addElement(newElement);
+            broadcast({ type: 'ADD_ELEMENT', payload: newElement });
+            setActiveTool('select');
+            return;
+        }
+
+        setPendingTool(activeTool as ElementType);
+        setPendingClick(worldPos);
+        setModalOpen(true);
     };
 
     const handleModalSubmit = (content: string, type: ElementType) => {
@@ -516,6 +671,12 @@ export function Board({ roomId }: BoardProps) {
 
     return (
         <div className="relative w-full h-screen overflow-hidden bg-[#0f0f11] text-foreground">
+            <style dangerouslySetInnerHTML={{
+                __html: `
+                .cursor-brush {
+                    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m12 19 7-7 3 3-7 7-3-3Z'/%3E%3Cpath d='m18 13-1.5-7.5L4 2l3.5 12.5L13 16'/%3E%3Cpath d='m5 15 3.5 3.5'/%3E%3C/svg%3E") 0 24, auto;
+                }
+            `}} />
             <AddContentDialog
                 open={modalOpen}
                 onOpenChange={setModalOpen}
@@ -525,7 +686,7 @@ export function Board({ roomId }: BoardProps) {
 
             {/* Zoom Controls */}
             <div className="absolute bottom-4 sm:bottom-6 right-4 sm:right-6 z-50 flex flex-col gap-2 glass p-2 rounded-xl border border-white/10">
-                <button onClick={() => updateVisualViewport((v: any) => ({ ...v, scale: Math.min(v.scale + 0.1, 5) }), true)} className="p-3 sm:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg touch-manipulation">+</button>
+                <button onClick={() => updateVisualViewport((v: any) => ({ ...v, scale: Math.min(v.scale + 0.1, 2) }), true)} className="p-3 sm:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg touch-manipulation">+</button>
                 <div className="text-center text-xs font-mono opacity-50">{Math.round(viewport.scale * 100)}%</div>
                 <button onClick={() => updateVisualViewport((v: any) => ({ ...v, scale: Math.max(v.scale - 0.1, 0.5) }), true)} className="p-3 sm:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg touch-manipulation">-</button>
             </div>
@@ -554,9 +715,62 @@ export function Board({ roomId }: BoardProps) {
 
             <Toolbar activeTool={activeTool} setActiveTool={setActiveTool} onClearBoard={handleClearBoard} />
 
+            {/* Character Picker */}
+            {activeTool === 'character' && (
+                <div className="absolute top-16 sm:top-20 left-1/2 -translate-x-1/2 z-50 glass px-4 py-3 rounded-xl flex gap-3 shadow-xl border border-white/10 items-center justify-center animate-in fade-in slide-in-from-top-4">
+                    {Array.from({ length: 10 }).map((_, i) => (
+                        <button
+                            key={i}
+                            onClick={() => setSelectedCharType(i)}
+                            className={cn("relative p-1 rounded-lg transition-all hover:bg-white/10 hover:scale-110", selectedCharType === i ? "bg-white/20 ring-2 ring-primary" : "")}
+                        >
+                            <div className="w-8 h-8 pointer-events-none">
+                                <Character type={i} facing="right" isGrounded={true} isMoving={false} />
+                            </div>
+                        </button>
+                    ))}
+                    <div className="w-px h-8 bg-white/10 mx-1" />
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">Click board to place</span>
+                </div>
+            )}
+
+            {/* Draw Tool Options */}
+            {activeTool === 'path' && (
+                <div className="absolute top-16 sm:top-20 left-1/2 -translate-x-1/2 z-50 glass px-4 py-3 rounded-xl flex gap-4 shadow-xl border border-white/10 items-center animate-in fade-in slide-in-from-top-4">
+                    <div className="flex gap-2">
+                        {['#ffffff', '#ff4757', '#2ed573', '#1e90ff', '#eccc68', '#ffa502'].map(color => (
+                            <button
+                                key={color}
+                                onClick={() => setStrokeColor(color)}
+                                className={cn(
+                                    "w-6 h-6 rounded-full border-2 transition-transform hover:scale-110",
+                                    strokeColor === color ? "border-white scale-110 shadow-[0_0_8px_rgba(255,255,255,0.5)]" : "border-transparent"
+                                )}
+                                style={{ backgroundColor: color }}
+                            />
+                        ))}
+                    </div>
+                    <div className="w-px h-6 bg-white/10" />
+                    <div className="flex gap-2 items-center">
+                        {[2, 4, 8, 12].map(width => (
+                            <button
+                                key={width}
+                                onClick={() => setStrokeWidth(width)}
+                                className={cn(
+                                    "w-8 h-8 rounded flex items-center justify-center transition-all hover:bg-white/10",
+                                    strokeWidth === width ? "bg-white/20 text-white" : "text-white/40"
+                                )}
+                            >
+                                <div className="bg-current rounded-full" style={{ width: width, height: width }} />
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {/* Text Font Options */}
             {activeTool === 'text' && (
-                <div className="absolute top-16 sm:top-20 left-1/2 -translate-x-1/2 z-50 glass px-2 py-2 rounded-xl flex gap-1 shadow-xl border border-white/10">
+                <div className="absolute top-16 sm:top-20 left-1/2 -translate-x-1/2 z-50 glass px-2 py-2 rounded-xl flex gap-1 shadow-xl border border-white/10 animate-in fade-in slide-in-from-top-4">
                     {FONT_OPTIONS.map((font) => (
                         <button key={font.name} onClick={() => setSelectedFont(font.name)} className={cn("px-3 py-1.5 rounded-lg text-sm transition-all", selectedFont === font.name ? "bg-primary text-white" : "hover:bg-white/10 text-muted-foreground hover:text-white")} style={{ fontFamily: font.value, fontWeight: font.weight || 400 }}>
                             {font.name}
@@ -572,14 +786,28 @@ export function Board({ roomId }: BoardProps) {
             />
 
             <GestureOverlay ref={gestureOverlayRef} enabled={gestureMode} />
+            {Object.values(store.elements).some(el => el.type === 'character' && el.playerId === store.userId) && (
+                <CharacterController
+                    broadcast={broadcast}
+                    onFollow={(x, y) => {
+                        const centerX = window.innerWidth / 2;
+                        const centerY = window.innerHeight / 2;
+                        updateVisualViewport((prev: any) => ({
+                            ...prev,
+                            x: centerX - (x + 20) * prev.scale,
+                            y: centerY - (y + 20) * prev.scale
+                        }));
+                    }}
+                />
+            )}
 
             <div
                 ref={containerRef}
                 className={cn(
                     "w-full h-full relative outline-none touch-none overflow-hidden",
-                    activeTool === 'hand' || isPanning ? "cursor-grabbing" : activeTool === 'path' ? "cursor-crosshair" : activeTool !== 'select' ? "cursor-crosshair" : "cursor-default"
+                    activeTool === 'hand' || isPanning ? "cursor-grabbing" : activeTool === 'path' ? "cursor-brush" : activeTool !== 'select' ? "cursor-crosshair" : "cursor-default"
                 )}
-                onMouseMove={handleMouseMove}
+                onPointerMove={handlePointerMove}
                 onPointerDown={handlePointerDown}
                 onPointerUp={handlePointerUp}
                 onClick={handleCanvasClick}
@@ -592,10 +820,11 @@ export function Board({ roomId }: BoardProps) {
                         backfaceVisibility: 'hidden'
                     }}
                 >
-                    <div className="absolute -top-[50000px] -left-[50000px] w-[100000px] h-[100000px] opacity-[0.05] pointer-events-none"
+                    <div className="absolute -top-[2000px] -left-[2000px] w-[4000px] h-[4000px] pointer-events-none overflow-hidden rounded-sm ring-1 ring-white/10"
                         style={{
                             backgroundImage: `linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)`,
-                            backgroundSize: '40px 40px'
+                            backgroundSize: '40px 40px',
+                            opacity: 0.05
                         }}
                     />
 
@@ -619,18 +848,6 @@ export function Board({ roomId }: BoardProps) {
                         ))}
                     </AnimatePresence>
 
-                    {/* Temporary Path for Drawing */}
-                    <svg className="absolute top-0 left-0 overflow-visible pointer-events-none w-0 h-0">
-                        <path
-                            ref={tempPathRef}
-                            stroke="#fff"
-                            strokeWidth={4}
-                            fill="none"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            style={{ display: 'none' }}
-                        />
-                    </svg>
 
                     {inlineText && (
                         <input

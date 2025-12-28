@@ -20,14 +20,14 @@ const safeLocalStorage: StateStorage = {
 
 // --- Types ---
 
-export type ElementType = 'text' | 'image' | 'sticky' | 'music' | 'path';
+export type ElementType = 'text' | 'image' | 'sticky' | 'music' | 'path' | 'character';
 
 export interface BoardElement {
     id: string;
     type: ElementType;
     x: number;
     y: number;
-    content: string; // For music, this stores the YouTube Link; For path, can store SVG d path
+    content: string; // For music, length limit? For path, d path.
     width?: number;
     height?: number;
     rotation?: number;
@@ -36,13 +36,23 @@ export interface BoardElement {
     fontWeight?: number;
     // Music Specific
     isPlaying?: boolean;
-    playbackTime?: number; // Current playback time in seconds
-    lastSyncedAt?: number; // Timestamp when playbackTime was updated (for drift correction)
+    playbackTime?: number;
+    lastSyncedAt?: number;
 
     // Path Specific
     points?: { x: number, y: number }[];
     strokeColor?: string;
     strokeWidth?: number;
+
+    // Character Specific
+    charType?: number; // 0-9
+    vx?: number;
+    vy?: number;
+    facing?: 'left' | 'right';
+    isGrounded?: boolean;
+    respawnX?: number;
+    respawnY?: number;
+    playerId?: string; // ID of the user controlling this
 
     createdBy: string;
     createdAt?: number; // Timestamp for sorting/auto-scroll

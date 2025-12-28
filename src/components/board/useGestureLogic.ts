@@ -367,9 +367,12 @@ export function useGestureLogic({
                     physicsRef.current.vy = 0;
                 } else {
                     // UPDATE ZOOM
-                    // Calculate scale ratio
-                    const scaleRatio = dist / Math.max(zoom.initialDist, 1);
-                    const newScale = Math.min(Math.max(zoom.initialScale * scaleRatio, 0.1), 5); // Limit 0.1x to 5x
+                    // Calculate scale ratio with dampening
+                    const rawRatio = dist / Math.max(zoom.initialDist, 1);
+                    const sensitivity = 0.5; // Reduce zoom speed by half
+                    const scaleRatio = 1 + (rawRatio - 1) * sensitivity;
+
+                    const newScale = Math.min(Math.max(zoom.initialScale * scaleRatio, 0.5), 2); // Limit 0.5x to 2x
 
                     // Pinch Zoom Formula:
                     // Use initial anchor to prevent drifting if you wobble hands:

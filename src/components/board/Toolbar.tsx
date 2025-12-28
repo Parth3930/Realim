@@ -1,10 +1,10 @@
-import { MousePointer2, Hand, Type, Image as ImageIcon, Music, StickyNote, Eraser, Pen } from 'lucide-react';
+import { MousePointer2, Hand, Type, Image as ImageIcon, Music, StickyNote, Eraser, Pen, Gamepad2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useBoardStore, type ElementType } from '../../lib/store';
 
 interface ToolbarProps {
-    activeTool: ElementType | 'select' | 'hand' | 'pen';
-    setActiveTool: (tool: ElementType | 'select' | 'hand' | 'pen') => void;
+    activeTool: ElementType | 'select' | 'hand' | 'pen' | 'path' | 'character';
+    setActiveTool: (tool: ElementType | 'select' | 'hand' | 'pen' | 'path' | 'character') => void;
     onClearBoard: () => void;
 }
 
@@ -21,6 +21,7 @@ export function Toolbar({ activeTool, setActiveTool, onClearBoard }: ToolbarProp
             <ToolButton active={activeTool === 'music'} onClick={() => setActiveTool('music')} icon={<Music size={16} className="sm:w-[18px] sm:h-[18px]" />} label="Music" />
             <ToolButton active={activeTool === 'sticky'} onClick={() => setActiveTool('sticky')} icon={<StickyNote size={16} className="sm:w-[18px] sm:h-[18px]" />} label="Note" />
             <ToolButton active={activeTool === 'path'} onClick={() => setActiveTool('path')} icon={<Pen size={16} className="sm:w-[18px] sm:h-[18px]" />} label="Draw" />
+            <ToolButton active={activeTool === 'character'} onClick={() => setActiveTool('character')} icon={<Gamepad2 size={16} className="sm:w-[18px] sm:h-[18px]" />} label="Player" />
 
             {isHost && (
                 <>

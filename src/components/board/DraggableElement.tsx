@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { BoardElement } from '../../lib/store';
 import { MusicElementComponent } from './MediaElements';
+import { Character } from './Character';
 
 // RAF-based throttle for smoother, faster sync
 export const requestThrottle = (callback: Function, _delay: number) => {
@@ -33,7 +34,9 @@ export const MemoizedDraggableElement = memo(DraggableElement, (prev, next) => {
         prev.scale === next.scale &&
         // Checks for path
         prev.data.points === next.data.points &&
-        prev.data.strokeColor === next.data.strokeColor
+        JSON.stringify(prev.data.points) === JSON.stringify(next.data.points) &&
+        prev.data.strokeColor === next.data.strokeColor &&
+        prev.data.strokeWidth === next.data.strokeWidth
     );
 });
 
@@ -83,8 +86,8 @@ function DraggableElement({
             const deltaX = (ev.clientX - startX) / scale;
             const deltaY = (ev.clientY - startY) / scale;
 
-            const newX = initialX + deltaX;
-            const newY = initialY + deltaY;
+            const newX = Math.min(Math.max(initialX + deltaX, -2000), 2000);
+            const newY = Math.min(Math.max(initialY + deltaY, -2000), 2000);
 
             if (elementRef.current) {
                 elementRef.current.style.transform = `translate(${newX}px, ${newY}px)`;
@@ -102,8 +105,8 @@ function DraggableElement({
 
             const deltaX = (ev.clientX - startX) / scale;
             const deltaY = (ev.clientY - startY) / scale;
-            const newX = initialX + deltaX;
-            const newY = initialY + deltaY;
+            const newX = Math.min(Math.max(initialX + deltaX, -2000), 2000);
+            const newY = Math.min(Math.max(initialY + deltaY, -2000), 2000);
 
             onDragUpdate(newX, newY, true);
         };
@@ -117,15 +120,16 @@ function DraggableElement({
         if (!data.points || data.points.length < 2) return null;
 
         // Convert points to SVG path 'd'
-        // Assuming points are relative to x,y (0,0 is the element position)
         const d = `M ${data.points[0].x} ${data.points[0].y} ` +
             data.points.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ');
 
         return (
             <svg
-                width={data.width || 100}
-                height={data.height || 100}
                 className="overflow-visible pointer-events-none"
+                style={{
+                    width: Math.max(data.width || 0, 1),
+                    height: Math.max(data.height || 0, 1)
+                }}
             >
                 <path
                     d={d}
@@ -138,6 +142,24 @@ function DraggableElement({
             </svg>
         );
     };
+
+    // Auto-measure dimensions for physics/collisions
+    React.useEffect(() => {
+        if (!elementRef.current) return;
+
+        const observer = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                const { width, height } = entry.contentRect;
+                // Only update if dimensions changed significantly (>1px) to avoid loops
+                if (Math.abs((data.width || 0) - width) > 1 || Math.abs((data.height || 0) - height) > 1) {
+                    onElementUpdate({ width, height });
+                }
+            }
+        });
+
+        observer.observe(elementRef.current);
+        return () => observer.disconnect();
+    }, [data.id, data.width, data.height]);
 
     return (
         <div
@@ -157,6 +179,8 @@ function DraggableElement({
                 fontWeight: data.fontWeight || undefined,
                 transition: isDragging.current ? 'none' : 'transform 0.1s cubic-bezier(0.2, 0.8, 0.2, 1)',
                 backfaceVisibility: 'hidden',
+                // For sticky, we add the visual rotation here too if not in store
+                ...(data.type === 'sticky' && !data.rotation ? { transform: `translate3d(${data.x}px, ${data.y}px, 0) rotate(1deg) scale(${data.scale || 1})` } : {})
             }}
             onPointerDown={handlePointerDown}
         >
@@ -201,7 +225,15 @@ function DraggableElement({
                     />
                 )}
                 {data.type === 'path' && renderPath()}
+                {data.type === 'character' && (
+                    <Character
+                        type={data.charType || 0}
+                        facing={data.facing || 'right'}
+                        isGrounded={!!data.isGrounded}
+                        isMoving={Math.abs(data.vx || 0) > 0.1}
+                    />
+                )}
             </div>
         </div>
-    )
+    );
 }
