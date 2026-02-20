@@ -1,239 +1,262 @@
-import React, { useRef, memo } from 'react';
-import { X } from 'lucide-react';
-import { cn } from '../../lib/utils';
-import type { BoardElement } from '../../lib/store';
-import { MusicElementComponent } from './MediaElements';
-import { Character } from './Character';
+import React, { useRef, memo } from "react";
+import { X } from "lucide-react";
+import { cn } from "../../lib/utils";
+import type { BoardElement } from "../../lib/store";
+import { MusicElementComponent } from "./MediaElements";
+import { Character } from "./Character";
 
 // RAF-based throttle for smoother, faster sync
 export const requestThrottle = (callback: Function, _delay: number) => {
-    let pending = false;
-    let latestArgs: any[] = [];
-    return (...args: any[]) => {
-        latestArgs = args;
-        if (!pending) {
-            pending = true;
-            requestAnimationFrame(() => {
-                callback(...latestArgs);
-                pending = false;
-            });
-        }
-    };
+  let pending = false;
+  let latestArgs: any[] = [];
+  return (...args: any[]) => {
+    latestArgs = args;
+    if (!pending) {
+      pending = true;
+      requestAnimationFrame(() => {
+        callback(...latestArgs);
+        pending = false;
+      });
+    }
+  };
 };
 
 export const MemoizedDraggableElement = memo(DraggableElement, (prev, next) => {
-    return (
-        prev.data.x === next.data.x &&
-        prev.data.y === next.data.y &&
-        prev.data.content === next.data.content &&
-        prev.data.rotation === next.data.rotation &&
-        prev.data.scale === next.data.scale &&
-        prev.data.isPlaying === next.data.isPlaying &&
-        prev.data.playbackTime === next.data.playbackTime &&
-        prev.activeTool === next.activeTool &&
-        prev.scale === next.scale &&
-        // Checks for path
-        prev.data.points === next.data.points &&
-        JSON.stringify(prev.data.points) === JSON.stringify(next.data.points) &&
-        prev.data.strokeColor === next.data.strokeColor &&
-        prev.data.strokeWidth === next.data.strokeWidth
-    );
+  return (
+    prev.data.x === next.data.x &&
+    prev.data.y === next.data.y &&
+    prev.data.content === next.data.content &&
+    prev.data.rotation === next.data.rotation &&
+    prev.data.scale === next.data.scale &&
+    prev.data.isPlaying === next.data.isPlaying &&
+    prev.data.playbackTime === next.data.playbackTime &&
+    prev.activeTool === next.activeTool &&
+    prev.scale === next.scale &&
+    // Checks for path
+    prev.data.points === next.data.points &&
+    JSON.stringify(prev.data.points) === JSON.stringify(next.data.points) &&
+    prev.data.strokeColor === next.data.strokeColor &&
+    prev.data.strokeWidth === next.data.strokeWidth
+  );
 });
 
 function DraggableElement({
-    data,
-    activeTool,
-    onDelete,
-    onDragUpdate,
-    onElementUpdate,
-    scale
+  data,
+  activeTool,
+  onDelete,
+  onDragUpdate,
+  onElementUpdate,
+  scale,
 }: {
-    data: BoardElement,
-    activeTool: string,
-    onDelete: () => void,
-    onDragUpdate: (x: number, y: number, final: boolean) => void,
-    onElementUpdate: (updates: Partial<BoardElement>) => void,
-    scale: number
+  data: BoardElement;
+  activeTool: string;
+  onDelete: () => void;
+  onDragUpdate: (x: number, y: number, final: boolean) => void;
+  onElementUpdate: (updates: Partial<BoardElement>) => void;
+  scale: number;
 }) {
-    const elementRef = useRef<HTMLDivElement>(null);
-    const isDragging = useRef(false);
+  const elementRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
 
-    // Use RAF-based throttle for instant sync during drag
-    const broadcastMove = useRef(requestThrottle((x: number, y: number) => {
-        onDragUpdate(x, y, false);
-    }, 16)).current; // 16ms = ~60fps
+  // Use RAF-based throttle for instant sync during drag
+  const broadcastMove = useRef(
+    requestThrottle((x: number, y: number) => {
+      onDragUpdate(x, y, false);
+    }, 16),
+  ).current; // 16ms = ~60fps
 
-    const handlePointerDown = (e: React.PointerEvent) => {
-        if (activeTool !== 'select') return;
-        if (e.button !== 0) return;
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (activeTool !== "select") return;
+    if (e.button !== 0) return;
 
-        e.preventDefault();
-        e.stopPropagation();
+    e.preventDefault();
+    e.stopPropagation();
 
-        const target = e.currentTarget as HTMLDivElement;
-        target.setPointerCapture(e.pointerId);
-        isDragging.current = true;
+    const target = e.currentTarget as HTMLDivElement;
+    target.setPointerCapture(e.pointerId);
+    isDragging.current = true;
 
-        target.classList.add('ring-2', 'ring-primary', 'z-50', 'scale-[1.02]');
+    target.classList.add("ring-2", "ring-primary", "z-50", "scale-[1.02]");
 
-        const startX = e.clientX;
-        const startY = e.clientY;
-        const initialX = data.x;
-        const initialY = data.y;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const initialX = data.x;
+    const initialY = data.y;
 
-        const onPointerMove = (ev: PointerEvent) => {
-            if (!isDragging.current) return;
-            const deltaX = (ev.clientX - startX) / scale;
-            const deltaY = (ev.clientY - startY) / scale;
+    const onPointerMove = (ev: PointerEvent) => {
+      if (!isDragging.current) return;
+      const deltaX = (ev.clientX - startX) / scale;
+      const deltaY = (ev.clientY - startY) / scale;
 
-            const newX = Math.min(Math.max(initialX + deltaX, -2000), 2000);
-            const newY = Math.min(Math.max(initialY + deltaY, -2000), 2000);
+      const newX = Math.min(Math.max(initialX + deltaX, -2000), 2000);
+      const newY = Math.min(Math.max(initialY + deltaY, -2000), 2000);
 
-            if (elementRef.current) {
-                elementRef.current.style.transform = `translate(${newX}px, ${newY}px)`;
-            }
-            broadcastMove(newX, newY);
-        };
-
-        const onPointerUp = (ev: PointerEvent) => {
-            isDragging.current = false;
-            target.releasePointerCapture(ev.pointerId);
-            target.removeEventListener('pointermove', onPointerMove);
-            target.removeEventListener('pointerup', onPointerUp);
-
-            target.classList.remove('ring-2', 'ring-primary', 'z-50', 'scale-[1.02]');
-
-            const deltaX = (ev.clientX - startX) / scale;
-            const deltaY = (ev.clientY - startY) / scale;
-            const newX = Math.min(Math.max(initialX + deltaX, -2000), 2000);
-            const newY = Math.min(Math.max(initialY + deltaY, -2000), 2000);
-
-            onDragUpdate(newX, newY, true);
-        };
-
-        target.addEventListener('pointermove', onPointerMove);
-        target.addEventListener('pointerup', onPointerUp);
+      if (elementRef.current) {
+        elementRef.current.style.transform = `translate(${newX}px, ${newY}px)`;
+      }
+      broadcastMove(newX, newY);
     };
 
-    // Helper to render path
-    const renderPath = () => {
-        if (!data.points || data.points.length < 2) return null;
+    const onPointerUp = (ev: PointerEvent) => {
+      isDragging.current = false;
+      target.releasePointerCapture(ev.pointerId);
+      target.removeEventListener("pointermove", onPointerMove);
+      target.removeEventListener("pointerup", onPointerUp);
 
-        // Convert points to SVG path 'd'
-        const d = `M ${data.points[0].x} ${data.points[0].y} ` +
-            data.points.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ');
+      target.classList.remove("ring-2", "ring-primary", "z-50", "scale-[1.02]");
 
-        return (
-            <svg
-                className="overflow-visible pointer-events-none"
-                style={{
-                    width: Math.max(data.width || 0, 1),
-                    height: Math.max(data.height || 0, 1)
-                }}
-            >
-                <path
-                    d={d}
-                    stroke={data.strokeColor || "#ffffff"}
-                    strokeWidth={data.strokeWidth || 4}
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                />
-            </svg>
-        );
+      const deltaX = (ev.clientX - startX) / scale;
+      const deltaY = (ev.clientY - startY) / scale;
+      const newX = Math.min(Math.max(initialX + deltaX, -2000), 2000);
+      const newY = Math.min(Math.max(initialY + deltaY, -2000), 2000);
+
+      onDragUpdate(newX, newY, true);
     };
 
-    // Auto-measure dimensions for physics/collisions
-    React.useEffect(() => {
-        if (!elementRef.current) return;
+    target.addEventListener("pointermove", onPointerMove);
+    target.addEventListener("pointerup", onPointerUp);
+  };
 
-        const observer = new ResizeObserver((entries) => {
-            for (const entry of entries) {
-                const { width, height } = entry.contentRect;
-                // Only update if dimensions changed significantly (>1px) to avoid loops
-                if (Math.abs((data.width || 0) - width) > 1 || Math.abs((data.height || 0) - height) > 1) {
-                    onElementUpdate({ width, height });
-                }
-            }
-        });
+  // Helper to render path
+  const renderPath = () => {
+    if (!data.points || data.points.length < 2) return null;
 
-        observer.observe(elementRef.current);
-        return () => observer.disconnect();
-    }, [data.id, data.width, data.height]);
+    // Convert points to SVG path 'd'
+    const d =
+      `M ${data.points[0].x} ${data.points[0].y} ` +
+      data.points
+        .slice(1)
+        .map((p) => `L ${p.x} ${p.y}`)
+        .join(" ");
 
     return (
-        <div
-            ref={elementRef}
-            // Add data-element-id here for Gesture Hit Testing
-            data-element-id={data.id}
-            className={cn(
-                "absolute top-0 left-0 transition-shadow group select-none touch-none will-change-transform origin-top-left",
-                activeTool === 'select' ? "cursor-grab active:cursor-grabbing hover:ring-2 ring-primary/50" : "pointer-events-none",
-                data.type === 'image' && "p-0",
-                data.type === 'path' && "p-0", // Path should have no padding
-            )}
-            style={{
-                transform: `translate3d(${data.x}px, ${data.y}px, 0) rotate(${data.rotation || 0}deg)${data.type !== 'text' ? ` scale(${data.scale || 1})` : ''}`,
-                fontSize: data.type === 'text' ? `${20 * (data.scale || 1)}px` : undefined,
-                fontFamily: data.font || undefined,
-                fontWeight: data.fontWeight || undefined,
-                transition: isDragging.current ? 'none' : 'transform 0.1s cubic-bezier(0.2, 0.8, 0.2, 1)',
-                backfaceVisibility: 'hidden',
-                // For sticky, we add the visual rotation here too if not in store
-                ...(data.type === 'sticky' && !data.rotation ? { transform: `translate3d(${data.x}px, ${data.y}px, 0) rotate(1deg) scale(${data.scale || 1})` } : {})
-            }}
-            onPointerDown={handlePointerDown}
-        >
-            <div className={cn(
-                "relative rounded-xl border-2 border-transparent transition-transform",
-                data.type === 'text' && "bg-transparent min-w-[50px] p-2 hover:bg-white/5 rounded-lg hover:border-white/10",
-                data.type === 'sticky' && "bg-[#fef9c3] text-black shadow-lg rotate-1 font-[Patrick_Hand] text-2xl w-[220px] h-[220px] flex items-center justify-center p-6 text-center leading-tight hover:rotate-0",
-                data.type === 'image' && "border-none",
-                data.type === 'path' && "border-none",
-            )}>
-                {activeTool === 'select' && (
-                    <button
-                        onPointerDown={(e) => { e.stopPropagation(); onDelete(); }}
-                        className="absolute -top-3 -right-3 w-6 h-6 bg-destructive text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm hover:scale-110 z-[60]"
-                    >
-                        <X size={12} strokeWidth={3} />
-                    </button>
-                )}
-
-                {data.type === 'text' && (
-                    <div className="outline-none whitespace-pre-wrap max-w-none font-medium leading-relaxed text-balance">
-                        {data.content}
-                    </div>
-                )}
-                {data.type === 'sticky' && (
-                    <div className="w-full h-full flex flex-col items-center justify-center relative">
-                        <div className="absolute top-0 w-full h-8 bg-black/5 mix-blend-multiply" />
-                        <p className="w-full break-words">{data.content}</p>
-                    </div>
-                )}
-                {data.type === 'image' && (
-                    <img
-                        src={data.content}
-                        className="max-w-[400px] max-h-[400px] object-contain rounded-lg shadow-2xl bg-black/50 pointer-events-none select-none"
-                        draggable={false}
-                    />
-                )}
-                {data.type === 'music' && (
-                    <MusicElementComponent
-                        data={data}
-                        onUpdate={onElementUpdate}
-                    />
-                )}
-                {data.type === 'path' && renderPath()}
-                {data.type === 'character' && (
-                    <Character
-                        type={data.charType || 0}
-                        facing={data.facing || 'right'}
-                        isGrounded={!!data.isGrounded}
-                        isMoving={Math.abs(data.vx || 0) > 0.1}
-                    />
-                )}
-            </div>
-        </div>
+      <svg
+        className="overflow-visible pointer-events-none"
+        style={{
+          width: Math.max(data.width || 0, 1),
+          height: Math.max(data.height || 0, 1),
+        }}
+      >
+        <path
+          d={d}
+          stroke={data.strokeColor || "#ffffff"}
+          strokeWidth={data.strokeWidth || 4}
+          fill="none"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
     );
+  };
+
+  // Auto-measure dimensions for physics/collisions
+  React.useEffect(() => {
+    if (!elementRef.current) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        // Only update if dimensions changed significantly (>1px) to avoid loops
+        if (
+          Math.abs((data.width || 0) - width) > 1 ||
+          Math.abs((data.height || 0) - height) > 1
+        ) {
+          onElementUpdate({ width, height });
+        }
+      }
+    });
+
+    observer.observe(elementRef.current);
+    return () => observer.disconnect();
+  }, [data.id, data.width, data.height]);
+
+  return (
+    <div
+      ref={elementRef}
+      // Add data-element-id here for Gesture Hit Testing
+      data-element-id={data.id}
+      className={cn(
+        "absolute top-0 left-0 transition-shadow group select-none touch-none will-change-transform origin-top-left",
+        activeTool === "select"
+          ? "cursor-grab active:cursor-grabbing hover:ring-2 ring-primary/50"
+          : "pointer-events-none",
+        data.type === "image" && "p-0",
+        data.type === "path" && "p-0", // Path should have no padding
+      )}
+      style={{
+        transform: `translate3d(${data.x}px, ${data.y}px, 0) rotate(${data.rotation || 0}deg)${data.type !== "text" ? ` scale(${data.scale || 1})` : ""}`,
+        fontSize:
+          data.type === "text" ? `${20 * (data.scale || 1)}px` : undefined,
+        fontFamily: data.font || undefined,
+        fontWeight: data.fontWeight || undefined,
+        transition: isDragging.current
+          ? "none"
+          : "transform 0.1s cubic-bezier(0.2, 0.8, 0.2, 1)",
+        backfaceVisibility: "hidden",
+        // For sticky, we add the visual rotation here too if not in store
+        ...(data.type === "sticky" && !data.rotation
+          ? {
+              transform: `translate3d(${data.x}px, ${data.y}px, 0) rotate(1deg) scale(${data.scale || 1})`,
+            }
+          : {}),
+      }}
+      onPointerDown={handlePointerDown}
+    >
+      <div
+        className={cn(
+          "relative rounded-xl border-2 border-transparent transition-transform",
+          data.type === "text" &&
+            "bg-transparent min-w-[50px] p-2 hover:bg-white/5 rounded-lg hover:border-white/10",
+          data.type === "sticky" &&
+            "bg-[#fef9c3] text-black shadow-lg rotate-1 font-[Patrick_Hand] text-2xl w-[220px] h-[220px] flex items-center justify-center p-6 text-center leading-tight hover:rotate-0",
+          data.type === "image" && "border-none",
+          data.type === "path" && "border-none",
+        )}
+      >
+        {activeTool === "select" && (
+          <button
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="absolute -top-3 -right-3 w-6 h-6 bg-destructive text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm hover:scale-110 z-[60]"
+          >
+            <X size={12} strokeWidth={3} />
+          </button>
+        )}
+
+        {data.type === "text" && (
+          <div className="outline-none whitespace-pre-wrap max-w-none font-medium leading-relaxed text-balance">
+            {data.content}
+          </div>
+        )}
+        {data.type === "sticky" && (
+          <div className="w-full h-full flex flex-col items-center justify-center relative">
+            <div className="absolute top-0 w-full h-8 bg-black/5 mix-blend-multiply" />
+            <p className="w-full break-words">{data.content}</p>
+          </div>
+        )}
+        {data.type === "image" && (
+          <img
+            src={data.content}
+            alt="Board image"
+            className="max-w-[400px] max-h-[400px] object-contain rounded-lg shadow-2xl bg-black/50 pointer-events-none select-none"
+            draggable={false}
+          />
+        )}
+        {data.type === "music" && (
+          <MusicElementComponent data={data} onUpdate={onElementUpdate} />
+        )}
+        {data.type === "path" && renderPath()}
+        {data.type === "character" && (
+          <Character
+            type={data.charType || 0}
+            facing={data.facing || "right"}
+            isGrounded={!!data.isGrounded}
+            isMoving={Math.abs(data.vx || 0) > 0.1}
+          />
+        )}
+      </div>
+    </div>
+  );
 }
