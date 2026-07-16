@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest an idea or enhancement for Realim
+about: Suggest an idea or enhancement for PeerDraw
 title: '[FEATURE] '
 labels: enhancement
 assignees: ''

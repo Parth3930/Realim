@@ -189,7 +189,7 @@ export const useBoardStore = create<BoardState>()(
             })),
         }),
         {
-            name: 'realim-storage',
+            name: 'peerdraw-storage',
             storage: createJSONStorage(() => safeLocalStorage),
             partialize: (state) => ({
                 userId: state.userId,

@@ -222,12 +222,12 @@ export function Board({ roomId }: BoardProps) {
 
   useEffect(() => {
     store.setRoomId(roomId);
-    const hostMarker = localStorage.getItem(`realim_is_host_${roomId}`);
+    const hostMarker = localStorage.getItem(`peerdraw_is_host_${roomId}`);
     const hostPassword = localStorage.getItem(`room_pass_${roomId}`);
     const isCreator = hostMarker === "true" || !!hostPassword;
     store.setIsHost(isCreator);
 
-    get(`realim_room_${roomId}`).then((val) => {
+    get(`peerdraw_room_${roomId}`).then((val) => {
       if (val && Object.keys(val).length > 0) {
         if (Object.keys(store.elements).length === 0) {
           Object.values(val).forEach((el: any) => store.addElement(el));
@@ -240,7 +240,7 @@ export function Board({ roomId }: BoardProps) {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (Object.keys(store.elements).length > 0) {
-        set(`realim_room_${roomId}`, store.elements);
+        set(`peerdraw_room_${roomId}`, store.elements);
       }
     }, 300);
     return () => clearTimeout(timer);
@@ -709,7 +709,7 @@ export function Board({ roomId }: BoardProps) {
       store.deleteElement(id);
       broadcast({ type: "DELETE_ELEMENT", payload: { id } });
     });
-    set(`realim_room_${roomId}`, {});
+    set(`peerdraw_room_${roomId}`, {});
   };
 
   if (accessDenied) {

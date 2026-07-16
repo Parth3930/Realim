@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Create a report to help us improve Realim
+about: Create a report to help us improve PeerDraw
 title: '[BUG] '
 labels: bug
 assignees: ''

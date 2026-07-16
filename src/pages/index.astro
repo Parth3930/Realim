@@ -3,7 +3,7 @@ export const prerender = true;
 import Layout from "../layouts/Layout.astro";
 ---
 
-<Layout title="Realim | P2P Space">
+<Layout title="PeerDraw | P2P Space">
 	<main
 		class="w-full h-screen flex items-center justify-center relative overflow-hidden bg-background text-foreground"
 	>
@@ -35,13 +35,13 @@ import Layout from "../layouts/Layout.astro";
 					<div
 						class="inline-flex items-center justify-center p-3 bg-white/5 rounded-2xl mb-2 ring-1 ring-white/10 shadow-lg"
 					>
-						<img src="/logo.svg" alt="Realim" class="w-12 h-12" />
+						<img src="/logo.svg" alt="PeerDraw" class="w-12 h-12" />
 					</div>
 					<div>
 						<h1
 							class="text-3xl sm:text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-b from-white to-white/50 tracking-tight leading-tight"
 						>
-							Realim
+							PeerDraw
 						</h1>
 						<p
 							class="text-muted-foreground text-sm sm:text-base md:text-lg mt-2"
@@ -262,7 +262,7 @@ import Layout from "../layouts/Layout.astro";
 						<span
 							class="text-sm font-medium text-white/90 group-hover:text-white"
 						>
-							Enjoying Realim?
+							Enjoying PeerDraw?
 						</span>
 						<span
 							class="text-xs text-muted-foreground group-hover:text-primary"
@@ -315,7 +315,7 @@ import Layout from "../layouts/Layout.astro";
 		const loadingName = "Anon " + Math.floor(Math.random() * 1000);
 		if (usernameInput) usernameInput.value = loadingName;
 
-		const storageFn = localStorage.getItem("realim-storage");
+		const storageFn = localStorage.getItem("peerdraw-storage");
 		if (storageFn) {
 			const parsed = JSON.parse(storageFn);
 			if (parsed.state) {
@@ -391,7 +391,7 @@ import Layout from "../layouts/Layout.astro";
 	// Must define saveUser inside or outside? Module script scope.
 	function saveUser(name: string) {
 		try {
-			const storageFn = localStorage.getItem("realim-storage");
+			const storageFn = localStorage.getItem("peerdraw-storage");
 			let data = storageFn
 				? JSON.parse(storageFn)
 				: {
@@ -403,7 +403,7 @@ import Layout from "../layouts/Layout.astro";
 						version: 0,
 					};
 			data.state.username = name;
-			localStorage.setItem("realim-storage", JSON.stringify(data));
+			localStorage.setItem("peerdraw-storage", JSON.stringify(data));
 		} catch (e) {
 			console.error("Error saving store", e);
 		}
@@ -411,7 +411,7 @@ import Layout from "../layouts/Layout.astro";
 
 	function deleteRoom(roomId: string) {
 		try {
-			const storageFn = localStorage.getItem("realim-storage");
+			const storageFn = localStorage.getItem("peerdraw-storage");
 			if (!storageFn) return;
 
 			const data = JSON.parse(storageFn);
@@ -419,7 +419,7 @@ import Layout from "../layouts/Layout.astro";
 				data.state.savedRooms = data.state.savedRooms.filter(
 					(room: any) => room.id !== roomId,
 				);
-				localStorage.setItem("realim-storage", JSON.stringify(data));
+				localStorage.setItem("peerdraw-storage", JSON.stringify(data));
 
 				// Reload page to refresh the list
 				window.location.reload();

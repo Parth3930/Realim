@@ -39,7 +39,7 @@ export function useP2P(roomId: string | null, callbacks?: P2PCallbacks) {
     useEffect(() => {
         if (!roomId) return;
 
-        const config = { appId: 'realim-board-v1' };
+        const config = { appId: 'peerdraw-board-v1' };
         const room = joinRoom(config, roomId);
         roomRef.current = room;
 
@@ -48,7 +48,7 @@ export function useP2P(roomId: string | null, callbacks?: P2PCallbacks) {
         sendActionRef.current = sendAction;
 
         const hostPassword = localStorage.getItem(`room_pass_${roomId}`);
-        const isHostMarker = localStorage.getItem(`realim_is_host_${roomId}`);
+        const isHostMarker = localStorage.getItem(`peerdraw_is_host_${roomId}`);
         const initialJoinPass = sessionStorage.getItem(`join_pass_${roomId}`);
 
         // Determine if we're the host based on:

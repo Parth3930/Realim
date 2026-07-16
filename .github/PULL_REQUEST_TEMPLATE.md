@@ -81,4 +81,4 @@ Related to #
 
 ---
 
-**Thank you for contributing to Realim!** 🎉
+**Thank you for contributing to PeerDraw!** 🎉

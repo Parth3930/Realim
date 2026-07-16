@@ -1,8 +1,8 @@
-# Contributing to Realim
+# Contributing to PeerDraw
 
-First off, thank you for considering contributing to Realim! 🎉
+First off, thank you for considering contributing to PeerDraw! 🎉
 
-It's people like you that make Realim such a great tool. We welcome contributions from everyone, whether it's a bug report, feature suggestion, documentation improvement, or code contribution.
+It's people like you that make PeerDraw such a great tool. We welcome contributions from everyone, whether it's a bug report, feature suggestion, documentation improvement, or code contribution.
 
 ## 📋 Table of Contents
 
@@ -105,8 +105,8 @@ We actively welcome your pull requests!
 
 1. **Fork and Clone**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/realim.git
-   cd realim
+   git clone https://github.com/YOUR_USERNAME/peerdraw.git
+   cd peerdraw
    ```
 
 2. **Install Dependencies**
@@ -130,7 +130,7 @@ We actively welcome your pull requests!
 ### Project Structure Overview
 
 ```
-realim/
+peerdraw/
 ├── src/
 │   ├── components/     # React components
 │   │   ├── board/      # Board-specific components
@@ -369,6 +369,6 @@ If you have questions that aren't covered in this guide:
 
 ---
 
-Thank you for contributing to Realim! Your efforts help make this project better for everyone. 🙌
+Thank you for contributing to PeerDraw! Your efforts help make this project better for everyone. 🙌
 
 **Happy Coding!** 💻✨

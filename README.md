@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="public/logo.svg" alt="Realim Logo" width="120" height="120">
+  <img src="public/logo.svg" alt="PeerDraw Logo" width="120" height="120">
   
-  # Realim
+  # PeerDraw
   
   ### ✨ Ephemeral, Serverless, P2P Collaboration Space ✨
   
@@ -9,21 +9,21 @@
     A real-time collaborative whiteboard with gesture controls, multiplayer cursors, and zero server infrastructure.
   </p>
 
-  [![Live Demo](https://img.shields.io/badge/demo-realim.vercel.app-blue?style=for-the-badge)](https://realim.vercel.app)
+  [![Live Demo](https://img.shields.io/badge/demo-peerdraw.vercel.app-blue?style=for-the-badge)](https://peerdraw.vercel.app)
   [![Built with Astro](https://img.shields.io/badge/Astro-BC52EE?style=for-the-badge&logo=astro&logoColor=fff)](https://astro.build)
   [![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev)
   [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
   [![TailwindCSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
 
-  [🚀 Live Demo](https://realim.vercel.app) · [🐛 Report Bug](../../issues) · [💡 Request Feature](../../issues)
+  [🚀 Live Demo](https://peerdraw.vercel.app) · [🐛 Report Bug](../../issues) · [💡 Request Feature](../../issues)
 
 </div>
 
 ---
 
-## 🎯 What is Realim?
+## 🎯 What is PeerDraw?
 
-**Realim** is a cutting-edge, peer-to-peer collaborative workspace that operates entirely in your browser—no servers, no databases, no backend infrastructure. Create ephemeral collaboration spaces for brainstorming, whiteboarding, or just hanging out with your team in real-time.
+**PeerDraw** is a cutting-edge, peer-to-peer collaborative workspace that operates entirely in your browser—no servers, no databases, no backend infrastructure. Create ephemeral collaboration spaces for brainstorming, whiteboarding, or just hanging out with your team in real-time.
 
 ### 🌟 Key Highlights
 
@@ -47,7 +47,7 @@
 - Support for text, images, sticky notes, and drawings
 
 ### 🤝 Peer-to-Peer Magic
-Powered by [Trystero](https://github.com/dmotz/trystero), Realim establishes direct WebRTC connections between peers:
+Powered by [Trystero](https://github.com/dmotz/trystero), PeerDraw establishes direct WebRTC connections between peers:
 - Zero server costs
 - Ultra-low latency
 - Complete privacy
@@ -123,8 +123,8 @@ powershell -c "irm bun.sh/install.ps1 | iex"
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/realim.git
-   cd realim
+   git clone https://github.com/yourusername/peerdraw.git
+   cd peerdraw
    ```
 
 2. **Install dependencies**
@@ -158,7 +158,7 @@ bun run preview
 
 ### Creating a Room
 
-1. Visit [realim.vercel.app](https://realim.vercel.app)
+1. Visit [peerdraw.vercel.app](https://peerdraw.vercel.app)
 2. Optionally set a password for privacy
 3. Click **"Create New Space"**
 4. Share the generated room URL with collaborators
@@ -192,9 +192,9 @@ When enabled, use your webcam:
 ## 🏗️ Project Structure
 
 ```
-realim/
+peerdraw/
 ├── public/              # Static assets
-│   ├── logo.svg        # Realim logo
+│   ├── logo.svg        # PeerDraw logo
 │   ├── favicon.svg     # Favicon
 │   └── pixel_pet.png   # Character sprite
 ├── src/
@@ -267,7 +267,7 @@ This project is open source and available under the [MIT License](LICENSE).
 
 ## 💖 Support
 
-If you find Realim useful, consider supporting its development:
+If you find PeerDraw useful, consider supporting its development:
 
 <a href="https://buymeacoffee.com/Rover01" target="_blank">
   <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" >
@@ -289,14 +289,14 @@ If you find Realim useful, consider supporting its development:
 
 Have questions or suggestions? Feel free to open an issue or reach out!
 
-- **Live Demo**: [realim.vercel.app](https://realim.vercel.app)
+- **Live Demo**: [peerdraw.vercel.app](https://peerdraw.vercel.app)
 - **Report Issues**: [GitHub Issues](../../issues)
 
 ---
 
 <div align="center">
   
-  **[⬆ back to top](#realim)**
+  **[⬆ back to top](#peerdraw)**
   
   Made with ❤️ and ☕
   
