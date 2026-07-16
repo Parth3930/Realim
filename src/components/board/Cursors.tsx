@@ -21,10 +21,15 @@ export function Cursors({
           return (
             <m.div
               key={id}
-              className="absolute pointer-events-none z-50 flex flex-col items-start"
-              initial={{ left: cursor.x, top: cursor.y }}
-              animate={{ left: cursor.x, top: cursor.y }}
-              transition={{ type: "tween", ease: "linear", duration: 0.1 }}
+              className="absolute pointer-events-none z-50 flex flex-col items-start origin-top-left"
+              initial={{ left: cursor.x, top: cursor.y, opacity: 0 }}
+              animate={{ left: cursor.x, top: cursor.y, opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ 
+                left: { type: "spring", damping: 30, stiffness: 400, mass: 0.5 },
+                top: { type: "spring", damping: 30, stiffness: 400, mass: 0.5 },
+                opacity: { duration: 0.2 }
+              }}
               style={{ transform: `scale(${1 / viewportScale})` }}
             >
               <UserCursorIcon color={cursor.color} label={cursor.username} />
@@ -38,24 +43,28 @@ export function Cursors({
 
 function UserCursorIcon({ color, label }: { color: string; label: string }) {
   return (
-    <>
+    <div className="relative">
       <svg
         width="24"
         height="24"
         viewBox="0 0 24 24"
         fill="none"
-        className="drop-shadow-md"
+        className="drop-shadow-xl"
+        style={{ filter: `drop-shadow(0px 2px 4px rgba(0,0,0,0.5))` }}
       >
         <path
           d="M5.65376 12.3673H5.46026L5.31717 12.4976L0.500002 16.8829L0.500002 1.19177L11.7841 12.3673H5.65376Z"
-          fill={color || "#fff"}
-          stroke="black"
-          strokeWidth="1"
+          fill={color || "#3b82f6"}
+          stroke="white"
+          strokeWidth="1.5"
         />
       </svg>
-      <div className="ml-4 -mt-2 bg-black/50 backdrop-blur-sm text-white text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap border border-white/10">
+      <div 
+        className="absolute left-4 top-4 bg-black/70 backdrop-blur-md text-white text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap border border-white/10 shadow-lg"
+        style={{ backgroundColor: color ? `${color}dd` : 'rgba(0,0,0,0.7)' }}
+      >
         {label}
       </div>
-    </>
+    </div>
   );
 }

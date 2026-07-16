@@ -121,11 +121,12 @@
 
     body {
         @apply bg-background text-foreground;
-        /* Custom Dot Pattern */
-        background-image: radial-gradient(#222 1px, transparent 1px);
-        background-size: 24px 24px;
         font-family: "Outfit", "Inter", system-ui, sans-serif;
-        /* Use Outfit as requested */
+    }
+
+    /* Hide native cursor everywhere on the board — SmoothCursor handles it */
+    body.cursor-none, body.cursor-none * {
+        cursor: none !important;
     }
 }
 

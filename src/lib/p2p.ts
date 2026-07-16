@@ -12,7 +12,8 @@ type Action =
     | { type: 'UPDATE_ELEMENT'; payload: { id: string; updates: Partial<BoardElement> } }
     | { type: 'DELETE_ELEMENT'; payload: { id: string } }
     | { type: 'CURSOR_MOVE'; payload: UserCursor }
-    | { type: 'CONFETTI'; payload: { x: number; y: number } };
+    | { type: 'CONFETTI'; payload: { x: number; y: number } }
+    | { type: 'CHAT_MESSAGE'; payload: { id: string, sender: string, text: string, timestamp: number } };
 
 interface P2PCallbacks {
     onConfetti?: (x: number, y: number) => void;
@@ -201,6 +202,10 @@ export function useP2P(roomId: string | null, callbacks?: P2PCallbacks) {
                     if (callbacksRef.current?.onConfetti) {
                         callbacksRef.current.onConfetti(data.payload.x, data.payload.y);
                     }
+                    break;
+                    
+                case 'CHAT_MESSAGE':
+                    store.addMessage(data.payload);
                     break;
             }
         });

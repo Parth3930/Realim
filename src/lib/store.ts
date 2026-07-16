@@ -20,7 +20,7 @@ const safeLocalStorage: StateStorage = {
 
 // --- Types ---
 
-export type ElementType = 'text' | 'image' | 'sticky' | 'music' | 'path' | 'character';
+export type ElementType = 'text' | 'image' | 'sticky' | 'music' | 'path' | 'character' | 'shape';
 
 export interface BoardElement {
     id: string;
@@ -53,6 +53,10 @@ export interface BoardElement {
     respawnX?: number;
     respawnY?: number;
     playerId?: string; // ID of the user controlling this
+
+    // Shape Specific
+    shapeType?: 'rectangle' | 'circle' | 'triangle';
+    backgroundColor?: string;
 
     createdBy: string;
     createdAt?: number; // Timestamp for sorting/auto-scroll
@@ -87,6 +91,10 @@ interface BoardState {
 
     // Saved Rooms (Recent 5)
     savedRooms: SavedRoom[];
+
+    // Chat
+    messages: { id: string, sender: string, text: string, timestamp: number }[];
+    addMessage: (msg: { id: string, sender: string, text: string, timestamp: number }) => void;
 
     // Actions
     setRoomId: (id: string) => void;
@@ -131,6 +139,9 @@ export const useBoardStore = create<BoardState>()(
             cursors: {},
             peers: [],
             savedRooms: [],
+            messages: [],
+
+            addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg].slice(-50) })),
 
             setRoomId: (roomId) => set({ roomId }),
             setUserInfo: (username) => set({ username }),

@@ -75,8 +75,10 @@ function DraggableElement({
     const target = e.currentTarget as HTMLDivElement;
     target.setPointerCapture(e.pointerId);
     isDragging.current = true;
-
-    target.classList.add("ring-2", "ring-primary", "z-50", "scale-[1.02]");
+    
+    // Disable transition instantly for zero-lag drag
+    target.style.transition = "none";
+    target.style.zIndex = "50";
 
     const startX = e.clientX;
     const startY = e.clientY;
@@ -92,7 +94,11 @@ function DraggableElement({
       const newY = Math.min(Math.max(initialY + deltaY, -2000), 2000);
 
       if (elementRef.current) {
-        elementRef.current.style.transform = `translate(${newX}px, ${newY}px)`;
+        let transformStr = `translate3d(${newX}px, ${newY}px, 0) rotate(${data.rotation || 0}deg)${data.type !== "text" ? ` scale(${data.scale || 1})` : ""}`;
+        if (data.type === "sticky" && !data.rotation) {
+          transformStr = `translate3d(${newX}px, ${newY}px, 0) rotate(1deg) scale(${data.scale || 1})`;
+        }
+        elementRef.current.style.transform = transformStr;
       }
       broadcastMove(newX, newY);
     };
@@ -103,7 +109,9 @@ function DraggableElement({
       target.removeEventListener("pointermove", onPointerMove);
       target.removeEventListener("pointerup", onPointerUp);
 
-      target.classList.remove("ring-2", "ring-primary", "z-50", "scale-[1.02]");
+      // Restore transition
+      target.style.transition = "transform 0.1s cubic-bezier(0.2, 0.8, 0.2, 1)";
+      target.style.zIndex = "";
 
       const deltaX = (ev.clientX - startX) / scale;
       const deltaY = (ev.clientY - startY) / scale;
@@ -170,6 +178,28 @@ function DraggableElement({
     return () => observer.disconnect();
   }, [data.id, data.width, data.height]);
 
+  // Allow zooming individual elements with mouse wheel
+  React.useEffect(() => {
+    const el = elementRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (activeTool !== "select") return;
+      e.preventDefault();
+      e.stopPropagation(); // Stop board from zooming
+
+      const zoomSensitivity = 0.002;
+      const delta = -e.deltaY * zoomSensitivity;
+      const currentScale = data.scale || 1;
+      const newScale = Math.min(Math.max(currentScale + delta, 0.2), 10);
+      
+      onElementUpdate({ scale: newScale });
+    };
+
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [activeTool, data.scale, onElementUpdate]);
+
   return (
     <div
       ref={elementRef}
@@ -226,7 +256,10 @@ function DraggableElement({
         )}
 
         {data.type === "text" && (
-          <div className="outline-none whitespace-pre-wrap max-w-none font-medium leading-relaxed text-balance">
+          <div 
+            className="outline-none whitespace-pre-wrap max-w-none leading-relaxed text-balance"
+            style={{ color: data.strokeColor || "#0A0A0A" }}
+          >
             {data.content}
           </div>
         )}
@@ -255,6 +288,27 @@ function DraggableElement({
             isGrounded={!!data.isGrounded}
             isMoving={Math.abs(data.vx || 0) > 0.1}
           />
+        )}
+        {data.type === "shape" && (
+          <svg 
+            width={data.width || 100} 
+            height={data.height || 100} 
+            viewBox="0 0 100 100" 
+            className="overflow-visible"
+            style={{ 
+              filter: "drop-shadow(4px 4px 0px #0A0A0A)"
+            }}
+          >
+            {data.shapeType === "rectangle" && (
+              <rect x="2" y="2" width="96" height="96" rx="10" fill={data.backgroundColor || "#E8553A"} stroke="#0A0A0A" strokeWidth="4" />
+            )}
+            {data.shapeType === "circle" && (
+              <circle cx="50" cy="50" r="48" fill={data.backgroundColor || "#E8553A"} stroke="#0A0A0A" strokeWidth="4" />
+            )}
+            {data.shapeType === "triangle" && (
+              <polygon points="50,4 4,96 96,96" fill={data.backgroundColor || "#E8553A"} stroke="#0A0A0A" strokeWidth="4" strokeLinejoin="round" />
+            )}
+          </svg>
         )}
       </div>
     </div>

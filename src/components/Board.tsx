@@ -9,7 +9,7 @@ import { useP2P } from "../lib/p2p";
 import { nanoid } from "nanoid";
 import { AnimatePresence } from "framer-motion";
 import { get, set } from "idb-keyval";
-import { Key } from "lucide-react";
+import { Key, Circle, Triangle, Square } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -23,6 +23,21 @@ import { GestureOverlay } from "./board/GestureOverlay";
 import { useGestureLogic } from "./board/useGestureLogic";
 import { Character } from "./board/Character";
 import { CharacterController } from "./board/CharacterController";
+import { Chat } from "./board/Chat";
+import { SmoothCursor } from "./SmoothCursor";
+
+// Deterministic color from userId string
+const USER_COLORS = [
+  "#7c3aed", "#2563eb", "#db2777", "#059669", "#d97706",
+  "#dc2626", "#0891b2", "#7c3aed", "#65a30d", "#ea580c",
+];
+function getUserColor(userId: string): string {
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = userId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return USER_COLORS[Math.abs(hash) % USER_COLORS.length];
+}
 
 // Debounce helper
 const debounce = (func: Function, wait: number) => {
@@ -106,12 +121,12 @@ export function Board({ roomId }: BoardProps) {
 
   // Tools & Mode
   const [activeTool, setActiveTool] = useState<
-    ElementType | "select" | "hand" | "pen" | "path" | "character"
+    ElementType | "select" | "hand" | "pen" | "path" | "character" | "eraser"
   >("select");
   const [gestureMode, setGestureMode] = useState(false);
 
-  // Character Picker
   const [selectedCharType, setSelectedCharType] = useState(0);
+  const [selectedShapeType, setSelectedShapeType] = useState<"rectangle" | "circle" | "triangle">("rectangle");
 
   // Dialogs
   const [modalOpen, setModalOpen] = useState(false);
@@ -135,8 +150,8 @@ export function Board({ roomId }: BoardProps) {
   const [isPanning, setIsPanning] = useState(false);
 
   // Draw State
-  const [strokeColor, setStrokeColor] = useState("#ffffff");
   const [strokeWidth, setStrokeWidth] = useState(4);
+  const [strokeColor, setStrokeColor] = useState("#0A0A0A");
   const currentDrawingId = useRef<string | null>(null);
   const currentPathPoints = useRef<{ x: number; y: number }[]>([]);
   const isDrawing = useRef(false);
@@ -237,11 +252,22 @@ export function Board({ roomId }: BoardProps) {
     store.saveRoom(roomId);
   }, [roomId]);
 
+  const prevElementCountRef = useRef(0);
   useEffect(() => {
+    const count = Object.keys(store.elements).length;
+    const prev = prevElementCountRef.current;
+    prevElementCountRef.current = count;
+
+    // If elements were DELETED, save immediately (don't wait for debounce)
+    // This prevents erased items from ghosting back on reload
+    if (count < prev) {
+      set(`peerdraw_room_${roomId}`, store.elements);
+      return;
+    }
+
+    // For adds/updates (e.g. drawing), debounce to avoid hammering IDB
     const timer = setTimeout(() => {
-      if (Object.keys(store.elements).length > 0) {
-        set(`peerdraw_room_${roomId}`, store.elements);
-      }
+      set(`peerdraw_room_${roomId}`, store.elements);
     }, 300);
     return () => clearTimeout(timer);
   }, [store.elements, roomId]);
@@ -461,7 +487,8 @@ export function Board({ roomId }: BoardProps) {
 
       const id = nanoid();
       currentDrawingId.current = id;
-      currentPathPoints.current = [{ x: 0, y: 0 }];
+      // Store absolute world positions while drawing — normalize on every update
+      currentPathPoints.current = [startWorldPos];
 
       const newElement: BoardElement = {
         id,
@@ -482,35 +509,46 @@ export function Board({ roomId }: BoardProps) {
       store.addElement(newElement);
       broadcast({ type: "ADD_ELEMENT", payload: newElement });
 
-      const throttledBroadcast = debounce((pts: any[]) => {
+      const throttledBroadcast = debounce((updates: any) => {
         broadcast({
           type: "UPDATE_ELEMENT",
-          payload: {
-            id,
-            updates: { points: pts, lastModifiedAt: Date.now() },
-          },
+          payload: { id, updates },
         });
       }, 32);
+
+      // Helper: normalize absolute world points into element-relative coords
+      // so that el.x/y = top-left of bounding box, and all points >= 0
+      const normalize = (absPoints: { x: number; y: number }[]) => {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        absPoints.forEach((p) => {
+          minX = Math.min(minX, p.x);
+          minY = Math.min(minY, p.y);
+          maxX = Math.max(maxX, p.x);
+          maxY = Math.max(maxY, p.y);
+        });
+        return {
+          x: minX,
+          y: minY,
+          width: Math.max(maxX - minX, 4),
+          height: Math.max(maxY - minY, 4),
+          points: absPoints.map((p) => ({ x: p.x - minX, y: p.y - minY })),
+        };
+      };
 
       const onMove = (ev: PointerEvent) => {
         if (!isDrawing.current || !currentDrawingId.current) return;
         const r = containerRef.current!.getBoundingClientRect();
         const wp = toWorld(ev.clientX - r.left, ev.clientY - r.top);
 
-        const relPoint = {
-          x: wp.x - startWorldPos.x,
-          y: wp.y - startWorldPos.y,
-        };
+        // Accumulate absolute world positions
+        currentPathPoints.current.push(wp);
 
-        currentPathPoints.current.push(relPoint);
-        const updatedPoints = [...currentPathPoints.current];
+        // Normalize on every frame so the element always sits at its true top-left
+        const norm = normalize(currentPathPoints.current);
+        const updates = { ...norm, lastModifiedAt: Date.now() };
 
-        store.updateElement(currentDrawingId.current, {
-          points: updatedPoints,
-          lastModifiedAt: Date.now(),
-        });
-
-        throttledBroadcast(updatedPoints);
+        store.updateElement(currentDrawingId.current, updates);
+        throttledBroadcast(updates);
       };
 
       const onUp = () => {
@@ -519,29 +557,9 @@ export function Board({ roomId }: BoardProps) {
           window.removeEventListener("pointermove", onMove);
           window.removeEventListener("pointerup", onUp);
 
-          // Final sync to confirm all points are correct
           if (currentDrawingId.current) {
-            const pts = [...currentPathPoints.current];
-
-            // Calculate final bounds for collision optimization
-            let minX = 0,
-              minY = 0,
-              maxX = 0,
-              maxY = 0;
-            pts.forEach((p) => {
-              minX = Math.min(minX, p.x);
-              minY = Math.min(minY, p.y);
-              maxX = Math.max(maxX, p.x);
-              maxY = Math.max(maxY, p.y);
-            });
-
-            const finalUpdates = {
-              points: pts,
-              width: Math.max(maxX - minX, 20), // Minimum size for visibility
-              height: Math.max(maxY - minY, 20),
-              lastModifiedAt: Date.now(),
-            };
-
+            const norm = normalize(currentPathPoints.current);
+            const finalUpdates = { ...norm, lastModifiedAt: Date.now() };
             store.updateElement(currentDrawingId.current, finalUpdates);
             broadcast({
               type: "UPDATE_ELEMENT",
@@ -552,6 +570,70 @@ export function Board({ roomId }: BoardProps) {
           currentDrawingId.current = null;
           currentPathPoints.current = [];
         }
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    } else if (activeTool === "eraser") {
+      e.preventDefault();
+      e.stopPropagation();
+      isDrawing.current = true;
+
+      // Eraser: compute accurate world-space bounds per element type
+      const getWorldBounds = (el: any) => {
+        // For paths, compute actual bounds from the relative points array
+        if (el.type === 'path' && el.points && el.points.length > 0) {
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          el.points.forEach((p: {x: number; y: number}) => {
+            minX = Math.min(minX, el.x + p.x);
+            minY = Math.min(minY, el.y + p.y);
+            maxX = Math.max(maxX, el.x + p.x);
+            maxY = Math.max(maxY, el.y + p.y);
+          });
+          return { left: minX, top: minY, right: maxX, bottom: maxY };
+        }
+        // For all other elements, use stored x/y/width/height
+        return {
+          left: el.x,
+          top: el.y,
+          right: el.x + (el.width || 120),
+          bottom: el.y + (el.height || 120),
+        };
+      };
+
+      const ERASE_RADIUS = 20;
+
+      const eraseElementsAtWorldPos = (clientX: number, clientY: number) => {
+        if (!containerRef.current) return;
+        const r = containerRef.current.getBoundingClientRect();
+        const worldPos = toWorld(clientX - r.left, clientY - r.top);
+        // Snapshot keys to avoid mutating while iterating
+        const elements = Object.values(store.elements);
+        elements.forEach((el) => {
+          const b = getWorldBounds(el);
+          if (
+            worldPos.x >= b.left - ERASE_RADIUS &&
+            worldPos.x <= b.right + ERASE_RADIUS &&
+            worldPos.y >= b.top - ERASE_RADIUS &&
+            worldPos.y <= b.bottom + ERASE_RADIUS
+          ) {
+            store.deleteElement(el.id);
+            broadcast({ type: "DELETE_ELEMENT", payload: { id: el.id } });
+          }
+        });
+      };
+
+      eraseElementsAtWorldPos(e.clientX, e.clientY);
+
+      const onMove = (ev: PointerEvent) => {
+        if (!isDrawing.current) return;
+        eraseElementsAtWorldPos(ev.clientX, ev.clientY);
+      };
+
+      const onUp = () => {
+        isDrawing.current = false;
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
       };
 
       window.addEventListener("pointermove", onMove);
@@ -576,7 +658,7 @@ export function Board({ roomId }: BoardProps) {
           y: worldPos.y,
           userId: store.userId,
           username: store.username,
-          color: "#8b5cf6",
+          color: getUserColor(store.userId),
         },
       });
       lastCursorUpdate.current = now;
@@ -605,6 +687,7 @@ export function Board({ roomId }: BoardProps) {
       createdAt: Date.now(),
       font: fontOption.value,
       fontWeight: fontOption.weight,
+      strokeColor: strokeColor,
     };
     store.addElement(newElement);
     broadcast({ type: "ADD_ELEMENT", payload: newElement });
@@ -624,6 +707,7 @@ export function Board({ roomId }: BoardProps) {
       activeTool === "hand" ||
       isPanning ||
       activeTool === "path" ||
+      activeTool === "eraser" ||
       isDrawing.current
     )
       return;
@@ -678,6 +762,29 @@ export function Board({ roomId }: BoardProps) {
       return;
     }
 
+    // Spawn Shape
+    if (activeTool === "shape") {
+      const id = nanoid();
+      
+      const newElement: BoardElement = {
+        id,
+        type: "shape",
+        x: worldPos.x - 50,
+        y: worldPos.y - 50,
+        width: 100,
+        height: 100,
+        content: "",
+        shapeType: selectedShapeType,
+        backgroundColor: strokeColor,
+        createdBy: store.userId,
+        createdAt: Date.now(),
+      };
+      store.addElement(newElement);
+      broadcast({ type: "ADD_ELEMENT", payload: newElement });
+      setActiveTool("select");
+      return;
+    }
+
     setPendingTool(activeTool as ElementType);
     setPendingClick(worldPos);
     setModalOpen(true);
@@ -714,15 +821,13 @@ export function Board({ roomId }: BoardProps) {
 
   if (accessDenied) {
     return (
-      <div className="w-full h-screen flex items-center justify-center bg-[#0f0f11] text-foreground bg-dot-pattern">
-        <div className="glass p-8 rounded-2xl border border-white/10 shadow-2xl max-w-md w-full text-center space-y-6">
-          <div className="mx-auto w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center text-red-500">
-            <Key size={24} />
+      <div className="w-full h-screen flex items-center justify-center" style={{ background: '#F5EDDA', backgroundImage: 'radial-gradient(#0A0A0A 1px, transparent 1px)', backgroundSize: '24px 24px' }}>
+        <div className="bg-white p-8 rounded-2xl border-3 border-[#0A0A0A] shadow-[6px_6px_0_#0A0A0A] max-w-md w-full text-center space-y-6 border-[3px]">
+          <div className="mx-auto w-12 h-12 bg-[#E8553A]/10 border-2 border-[#E8553A] rounded-xl flex items-center justify-center text-[#E8553A]">
+            <Key size={22} />
           </div>
-          <h2 className="text-2xl font-bold">Room Locked</h2>
-          <p className="text-muted-foreground">
-            This room is protected by a password.
-          </p>
+          <h2 className="text-2xl font-black uppercase tracking-tight text-[#0A0A0A]">Room Locked</h2>
+          <p className="text-[#0A0A0A]/50 font-medium">This room is protected by a password.</p>
           <div className="flex gap-2">
             <Input
               type="password"
@@ -730,9 +835,9 @@ export function Board({ roomId }: BoardProps) {
               value={passwordInput}
               onChange={(e) => setPasswordInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && retryJoin(passwordInput)}
-              className="bg-black/20 border-white/10"
+              className="bg-[#F5EDDA] border-2 border-[#0A0A0A] text-[#0A0A0A]"
             />
-            <Button onClick={() => retryJoin(passwordInput)}>Unlock</Button>
+            <Button onClick={() => retryJoin(passwordInput)} className="bg-[#0A0A0A] text-white border-2 border-[#0A0A0A] hover:bg-[#E8553A]">Unlock</Button>
           </div>
         </div>
       </div>
@@ -740,7 +845,13 @@ export function Board({ roomId }: BoardProps) {
   }
 
   return (
-    <div className="relative w-full h-screen overflow-hidden bg-[#0f0f11] text-foreground">
+    <div
+      className="relative w-full h-screen overflow-hidden text-[#0A0A0A]"
+      style={{ background: '#F5EDDA', backgroundImage: 'radial-gradient(#0A0A0A26 1px, transparent 1px)', backgroundSize: '24px 24px' }}
+    >
+      {/* Smooth cursor */}
+      <SmoothCursor color="#0A0A0A" />
+
       <AddContentDialog
         open={modalOpen}
         onOpenChange={setModalOpen}
@@ -749,7 +860,7 @@ export function Board({ roomId }: BoardProps) {
       />
 
       {/* Zoom Controls */}
-      <div className="absolute bottom-4 sm:bottom-6 right-4 sm:right-6 z-50 flex flex-col gap-2 glass p-2 rounded-xl border border-white/10">
+      <div className="absolute bottom-4 sm:bottom-6 right-4 sm:right-6 z-50 flex flex-col items-center gap-0 bg-white border-2 border-[#0A0A0A] rounded-xl shadow-[3px_3px_0_#0A0A0A] overflow-hidden">
         <button
           onClick={() =>
             updateVisualViewport(
@@ -757,11 +868,11 @@ export function Board({ roomId }: BoardProps) {
               true,
             )
           }
-          className="p-3 sm:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg touch-manipulation"
+          className="w-9 h-9 flex items-center justify-center font-black text-[#0A0A0A] hover:bg-[#F5C842] transition-colors text-lg"
         >
           +
         </button>
-        <div className="text-center text-xs font-mono opacity-50">
+        <div className="text-center text-[10px] font-black opacity-40 border-y-2 border-[#0A0A0A]/10 w-full text-center py-1">
           {Math.round(viewport.scale * 100)}%
         </div>
         <button
@@ -771,7 +882,7 @@ export function Board({ roomId }: BoardProps) {
               true,
             )
           }
-          className="p-3 sm:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg touch-manipulation"
+          className="w-9 h-9 flex items-center justify-center font-black text-[#0A0A0A] hover:bg-[#F5C842] transition-colors text-lg"
         >
           -
         </button>
@@ -789,7 +900,7 @@ export function Board({ roomId }: BoardProps) {
               if (btn) btn.innerText = "Invite Friend";
             }, 2000);
           }}
-          className="glass border-white/10 shadow-2xl hover:bg-white/10 active:bg-white/20 text-white gap-2 h-10 sm:h-auto px-3 sm:px-4 text-sm sm:text-base touch-manipulation"
+          className="bg-white border-2 border-[#0A0A0A] text-[#0A0A0A] font-black uppercase text-xs tracking-wide shadow-[3px_3px_0_#0A0A0A] hover:shadow-[1px_1px_0_#0A0A0A] hover:translate-x-[2px] hover:translate-y-[2px] transition-all px-4 h-9 touch-manipulation"
         >
           <span id="invite-text">Invite Friend</span>
         </Button>
@@ -801,10 +912,10 @@ export function Board({ roomId }: BoardProps) {
           size="icon"
           onClick={() => setGestureMode(!gestureMode)}
           className={cn(
-            "glass border-white/10 transition-all shadow-xl rounded-full w-10 h-10 sm:w-12 sm:h-12 touch-manipulation",
+            "border-2 border-[#0A0A0A] transition-all shadow-[3px_3px_0_#0A0A0A] rounded-xl w-10 h-10 sm:w-11 sm:h-11 touch-manipulation font-black text-sm",
             gestureMode
-              ? "bg-primary text-white"
-              : "hover:bg-white/10 active:bg-white/20 text-muted-foreground",
+              ? "bg-[#F5C842] text-[#0A0A0A]"
+              : "bg-white text-[#0A0A0A]/50 hover:text-[#0A0A0A] hover:shadow-[1px_1px_0_#0A0A0A] hover:translate-x-[2px] hover:translate-y-[2px]",
           )}
         >
           G
@@ -817,19 +928,22 @@ export function Board({ roomId }: BoardProps) {
         onClearBoard={handleClearBoard}
       />
 
-      {/* Character Picker */}
+      {/* Character Picker — left side, won't overlap toolbar */}
       {activeTool === "character" && (
-        <div className="absolute top-16 sm:top-20 left-1/2 -translate-x-1/2 z-50 glass px-4 py-3 rounded-xl flex gap-3 shadow-xl border border-white/10 items-center justify-center animate-in fade-in slide-in-from-top-4">
+        <div
+          className="absolute left-4 sm:left-6 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-1.5 p-2 rounded-2xl bg-white border-2 border-[#0A0A0A] shadow-[4px_4px_0_#0A0A0A] animate-in fade-in slide-in-from-left-4"
+        >
+          <p className="text-[9px] font-black text-[#0A0A0A]/40 uppercase tracking-widest text-center mb-0.5">Skin</p>
           {Array.from({ length: 10 }).map((_, i) => (
             <button
               key={i}
               onClick={() => setSelectedCharType(i)}
               className={cn(
-                "relative p-1 rounded-lg transition-all hover:bg-white/10 hover:scale-110",
-                selectedCharType === i ? "bg-white/20 ring-2 ring-primary" : "",
+                "relative p-1 rounded-xl transition-all hover:bg-[#F5C842]/30 hover:scale-110 border-2",
+                selectedCharType === i ? "bg-[#F5C842] border-[#0A0A0A] shadow-[2px_2px_0_#0A0A0A]" : "border-transparent",
               )}
             >
-              <div className="w-8 h-8 pointer-events-none">
+              <div className="w-7 h-7 pointer-events-none">
                 <Character
                   type={i}
                   facing="right"
@@ -839,53 +953,146 @@ export function Board({ roomId }: BoardProps) {
               </div>
             </button>
           ))}
-          <div className="w-px h-8 bg-white/10 mx-1" />
-          <span className="text-xs text-muted-foreground whitespace-nowrap">
-            Click board to place
-          </span>
+          <div className="h-px w-full bg-[#0A0A0A]/10 my-0.5" />
+          <p className="text-[8px] text-[#0A0A0A]/30 font-bold text-center uppercase">click board</p>
         </div>
       )}
 
-      {/* Draw Tool Options */}
-      {activeTool === "path" && (
-        <div className="absolute top-16 sm:top-20 left-1/2 -translate-x-1/2 z-50 glass px-4 py-3 rounded-xl flex gap-4 shadow-xl border border-white/10 items-center animate-in fade-in slide-in-from-top-4">
+      {/* Text Tool Options */}
+      {activeTool === "text" && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 bg-white border-2 border-[#0A0A0A] px-4 py-3 rounded-xl flex gap-4 shadow-[4px_4px_0_#0A0A0A] items-center animate-in fade-in slide-in-from-bottom-4">
           <div className="flex gap-2">
             {[
-              "#ffffff",
-              "#ff4757",
+              "#0A0A0A",
+              "#E8553A",
               "#2ed573",
               "#1e90ff",
-              "#eccc68",
-              "#ffa502",
+              "#F5C842",
+              "#a855f7",
             ].map((color) => (
               <button
                 key={color}
                 onClick={() => setStrokeColor(color)}
                 className={cn(
-                  "w-6 h-6 rounded-full border-2 transition-transform hover:scale-110",
+                  "w-6 h-6 rounded-full transition-transform hover:scale-110 border-2",
                   strokeColor === color
-                    ? "border-white scale-110 shadow-[0_0_8px_rgba(255,255,255,0.5)]"
-                    : "border-transparent",
+                    ? "border-[#0A0A0A] scale-110 shadow-[2px_2px_0_#0A0A0A]"
+                    : "border-[#0A0A0A]/30",
                 )}
                 style={{ backgroundColor: color }}
               />
             ))}
           </div>
-          <div className="w-px h-6 bg-white/10" />
+          <div className="w-px h-6 bg-[#0A0A0A]/15" />
+          <div className="flex gap-1">
+            {FONT_OPTIONS.map((font) => (
+              <button
+                key={font.name}
+                onClick={() => setSelectedFont(font.name)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-sm transition-all font-bold border-2",
+                  selectedFont === font.name
+                    ? "bg-[#F5C842] text-[#0A0A0A] border-[#0A0A0A] shadow-[2px_2px_0_#0A0A0A]"
+                    : "border-transparent text-[#0A0A0A]/50 hover:bg-[#0A0A0A]/5 hover:text-[#0A0A0A]",
+                )}
+                style={{ fontFamily: font.value, fontWeight: font.weight || 400 }}
+              >
+                {font.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Shape Tool Options */}
+      {activeTool === "shape" && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 bg-white border-2 border-[#0A0A0A] px-4 py-3 rounded-xl flex gap-4 shadow-[4px_4px_0_#0A0A0A] items-center animate-in fade-in slide-in-from-bottom-4">
+          <div className="flex gap-2 items-center">
+            {[
+              { type: 'rectangle', icon: <Square size={16} strokeWidth={2.5} /> },
+              { type: 'circle', icon: <Circle size={16} strokeWidth={2.5} /> },
+              { type: 'triangle', icon: <Triangle size={16} strokeWidth={2.5} /> }
+            ].map(({ type, icon }) => (
+              <button
+                key={type}
+                onClick={() => setSelectedShapeType(type as any)}
+                className={cn(
+                  "w-8 h-8 rounded-lg flex items-center justify-center transition-all border-2",
+                  selectedShapeType === type
+                    ? "bg-[#F5C842] border-[#0A0A0A] shadow-[2px_2px_0_#0A0A0A] text-[#0A0A0A]"
+                    : "border-transparent text-[#0A0A0A]/40 hover:bg-[#0A0A0A]/5 hover:text-[#0A0A0A]"
+                )}
+              >
+                {icon}
+              </button>
+            ))}
+          </div>
+          <div className="w-px h-6 bg-[#0A0A0A]/15" />
+          <div className="flex gap-2">
+            {[
+              "#0A0A0A",
+              "#E8553A",
+              "#2ed573",
+              "#1e90ff",
+              "#F5C842",
+              "#a855f7",
+            ].map((color) => (
+              <button
+                key={color}
+                onClick={() => setStrokeColor(color)}
+                className={cn(
+                  "w-6 h-6 rounded-full transition-transform hover:scale-110 border-2",
+                  strokeColor === color
+                    ? "border-[#0A0A0A] scale-110 shadow-[2px_2px_0_#0A0A0A]"
+                    : "border-[#0A0A0A]/30",
+                )}
+                style={{ backgroundColor: color }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Draw Tool Options */}
+      {activeTool === "path" && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 bg-white border-2 border-[#0A0A0A] px-4 py-3 rounded-xl flex gap-4 shadow-[4px_4px_0_#0A0A0A] items-center animate-in fade-in slide-in-from-bottom-4">
+          <div className="flex gap-2">
+            {[
+              "#0A0A0A",
+              "#E8553A",
+              "#2ed573",
+              "#1e90ff",
+              "#F5C842",
+              "#a855f7",
+            ].map((color) => (
+              <button
+                key={color}
+                onClick={() => setStrokeColor(color)}
+                className={cn(
+                  "w-6 h-6 rounded-full transition-transform hover:scale-110 border-2",
+                  strokeColor === color
+                    ? "border-[#0A0A0A] scale-110 shadow-[2px_2px_0_#0A0A0A]"
+                    : "border-[#0A0A0A]/30",
+                )}
+                style={{ backgroundColor: color }}
+              />
+            ))}
+          </div>
+          <div className="w-px h-6 bg-[#0A0A0A]/15" />
           <div className="flex gap-2 items-center">
             {[2, 4, 8, 12].map((width) => (
               <button
                 key={width}
                 onClick={() => setStrokeWidth(width)}
                 className={cn(
-                  "w-8 h-8 rounded flex items-center justify-center transition-all hover:bg-white/10",
+                  "w-8 h-8 rounded-lg flex items-center justify-center transition-all border-2",
                   strokeWidth === width
-                    ? "bg-white/20 text-white"
-                    : "text-white/40",
+                    ? "bg-[#F5C842] border-[#0A0A0A] shadow-[2px_2px_0_#0A0A0A]"
+                    : "border-transparent text-[#0A0A0A]/40 hover:bg-[#0A0A0A]/5",
                 )}
               >
                 <div
-                  className="bg-current rounded-full"
+                  className="rounded-full bg-[#0A0A0A]"
                   style={{ width: width, height: width }}
                 />
               </button>
@@ -894,26 +1101,7 @@ export function Board({ roomId }: BoardProps) {
         </div>
       )}
 
-      {/* Text Font Options */}
-      {activeTool === "text" && (
-        <div className="absolute top-16 sm:top-20 left-1/2 -translate-x-1/2 z-50 glass px-2 py-2 rounded-xl flex gap-1 shadow-xl border border-white/10 animate-in fade-in slide-in-from-top-4">
-          {FONT_OPTIONS.map((font) => (
-            <button
-              key={font.name}
-              onClick={() => setSelectedFont(font.name)}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-sm transition-all",
-                selectedFont === font.name
-                  ? "bg-primary text-white"
-                  : "hover:bg-white/10 text-muted-foreground hover:text-white",
-              )}
-              style={{ fontFamily: font.value, fontWeight: font.weight || 400 }}
-            >
-              {font.name}
-            </button>
-          ))}
-        </div>
-      )}
+
 
       <GestureController
         enabled={gestureMode}
@@ -943,21 +1131,14 @@ export function Board({ roomId }: BoardProps) {
         ref={containerRef}
         role="application"
         tabIndex={0}
-        className={cn(
-          "w-full h-full relative outline-none touch-none overflow-hidden",
-          activeTool === "hand" || isPanning
-            ? "cursor-grabbing"
-            : activeTool === "path"
-              ? "cursor-brush"
-              : activeTool !== "select"
-                ? "cursor-crosshair"
-                : "cursor-default",
-        )}
+        className="w-full h-full relative outline-none touch-none overflow-hidden"
         onPointerMove={handlePointerMove}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onClick={handleCanvasClick}
         onKeyDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
           if (e.key === "Enter" || e.key === " ") {
             handleCanvasClick(e as any);
           }
@@ -1024,11 +1205,12 @@ export function Board({ roomId }: BoardProps) {
                 if (inlineText.value.trim()) commitInlineText();
                 else setInlineText(null);
               }}
-              className="absolute bg-transparent border-none outline-none text-white text-lg font-medium caret-primary min-w-[100px]"
+              className="absolute bg-transparent border-none outline-none text-lg font-medium caret-primary min-w-[100px]"
               style={{
                 left: inlineText.x,
                 top: inlineText.y,
                 transform: "translateY(-50%)",
+                color: strokeColor,
               }}
               placeholder="Type here..."
             />
@@ -1041,6 +1223,8 @@ export function Board({ roomId }: BoardProps) {
           />
         </div>
       </div>
+
+      <Chat broadcast={broadcast} />
     </div>
   );
 }
