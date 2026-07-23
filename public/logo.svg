@@ -1,23 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Background with subtle gradient -->
+  <rect width="512" height="512" rx="128" fill="url(#bg-gradient)"/>
+  
+  <!-- Network Nodes / Peers -->
+  <circle cx="150" cy="180" r="32" fill="#F5C842" stroke="#0A0A0A" stroke-width="12"/>
+  <circle cx="360" cy="150" r="40" fill="#E8553A" stroke="#0A0A0A" stroke-width="12"/>
+  <circle cx="256" cy="360" r="48" fill="#a855f7" stroke="#0A0A0A" stroke-width="12"/>
+
+  <!-- Connections / Strokes -->
+  <path d="M176 195 L220 320" stroke="#0A0A0A" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M340 180 L290 325" stroke="#0A0A0A" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M182 170 Q 256 120 320 145" stroke="#0A0A0A" stroke-width="16" stroke-linecap="round" stroke-dasharray="24 16"/>
+
+  <!-- Pencil / Drawing Icon Overlaying -->
+  <g transform="translate(140, 20) rotate(45)">
+    <!-- Pencil Body -->
+    <path d="M150 150 L250 150 L250 350 L150 350 Z" fill="#2ed573" stroke="#0A0A0A" stroke-width="12"/>
+    <!-- Pencil Tip -->
+    <path d="M150 350 L200 430 L250 350 Z" fill="#F5EDDA" stroke="#0A0A0A" stroke-width="12"/>
+    <path d="M180 400 L200 430 L220 400 Z" fill="#0A0A0A"/>
+    <!-- Pencil Eraser -->
+    <path d="M150 120 L250 120 L250 150 L150 150 Z" fill="#E8553A" stroke="#0A0A0A" stroke-width="12"/>
+  </g>
+
+  <!-- Defs for Gradients -->
   <defs>
-    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#c084fc;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#db2777;stop-opacity:1" />
+    <linearGradient id="bg-gradient" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5EDDA"/>
+      <stop offset="1" stop-color="#E2D4B7"/>
     </linearGradient>
-    <linearGradient id="grad2" x1="100%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" style="stop-color:#22d3ee;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
-    </linearGradient>
-    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="3" result="blur" />
-      <feComposite in="SourceGraphic" in2="blur" operator="over" />
-    </filter>
   </defs>
-  
-  <!-- Outer ring -->
-  <circle cx="50" cy="50" r="42" stroke="url(#grad1)" stroke-width="6" stroke-linecap="round" fill="none" filter="url(#glow)" stroke-dasharray="200 60" transform="rotate(20 50 50)" />
-  
-  <!-- Inner geometric shape (Stylized R / Prism) -->
-  <path d="M35 35 L65 35 L50 75 Z" stroke="url(#grad2)" stroke-width="5" stroke-linejoin="round" fill="none" filter="url(#glow)" />
-  <circle cx="50" cy="48" r="6" fill="#fff" filter="url(#glow)" />
 </svg>

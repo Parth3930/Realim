@@ -9,13 +9,15 @@
     A real-time collaborative whiteboard with gesture controls, multiplayer cursors, and zero server infrastructure.
   </p>
 
+  <img src="public/demo.png" alt="PeerDraw Demo Screen" width="800" style="border-radius: 12px; border: 2px solid #0A0A0A; margin-bottom: 20px;">
+
   [![Live Demo](https://img.shields.io/badge/demo-peerdraw.vercel.app-blue?style=for-the-badge)](https://peerdraw.vercel.app)
   [![Built with Astro](https://img.shields.io/badge/Astro-BC52EE?style=for-the-badge&logo=astro&logoColor=fff)](https://astro.build)
   [![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev)
   [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
   [![TailwindCSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
 
-  [🚀 Live Demo](https://peerdraw.vercel.app) · [🐛 Report Bug](../../issues) · [💡 Request Feature](../../issues)
+  [🚀 Live Demo](https://peerdraw.vercel.app) · [🔗 Project Link](https://peerdraw.vercel.app/)
 
 </div>
 
